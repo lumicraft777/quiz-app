@@ -491,6 +491,10 @@ function generateKnowledgeQuestions(products) {
     (p) => `${p.maker}「${p.series}」の太陽光連携について正しい説明はどれ？`, "太陽光連携", "中級"));
   qs = qs.concat(genFieldQuestions(products, "installation",
     (p) => `${p.maker}「${p.series}」の設置条件（屋内/屋外）として正しいものはどれ？`, "メーカー比較", "中級"));
+  // V2Hは「対応/不明」しかなく明確な「非対応」行がないデータでも、
+  // 連携方式（V2Hポッド経由/eneplat経由 等）の違いから出題できるようにする
+  qs = qs.concat(genFieldQuestions(products, "v2h",
+    (p) => `${p.maker}「${p.series}」のV2H対応状況として正しいものはどれ？`, "V2H", "中級"));
 
   qs = qs.concat(genReverseQuestions(products, "suitableFamily",
     "次のような家庭に向いている製品はどれ？", "メリット/デメリット", "中級", "product"));
