@@ -85,6 +85,9 @@ function buildCsvUrl(sheetName) {
   if (sheetName) {
     url += `&sheet=${encodeURIComponent(sheetName)}`;
   }
+  // スプレッドシートを更新した直後でも、ブラウザ/回線上のキャッシュに
+  // 古いCSVが残って反映されないことがあるため、毎回異なる値を付けて回避する
+  url += `&_=${Date.now()}`;
   return url;
 }
 
