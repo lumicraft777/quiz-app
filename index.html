@@ -7,9 +7,15 @@
 <!-- style.css / script.js を編集したら ?v= の数字を必ず増やすこと。
      増やさないと、ブラウザにキャッシュされた古いファイルが
      読み込まれ続け、コード修正がユーザーの端末に反映されないため。 -->
-<link rel="stylesheet" href="style.css?v=2">
+<link rel="stylesheet" href="style.css?v=4">
 </head>
 <body>
+
+<!-- 効果音のON/OFF切り替え（全画面共通・localStorageに保存） -->
+<button type="button" id="btn-sound-toggle" class="sound-toggle" aria-label="効果音の切り替え">🔊</button>
+
+<!-- 連続正解（ストリーク）を知らせるトースト通知 -->
+<div id="streak-toast" class="streak-toast" hidden></div>
 
 <div id="app">
 
@@ -21,6 +27,7 @@
     <header class="app-header">
       <h1>蓄電池メーカー比較クイズ</h1>
       <p class="app-sub">知識を覚えて、営業現場での提案判断力を鍛えるトレーニングアプリ</p>
+      <p id="best-record-text" class="best-record-text"></p>
     </header>
 
     <!-- スプレッドシートの読み込み状況を表示するカード -->
@@ -72,11 +79,15 @@
        画面2：クイズ画面
   ============================================================= -->
   <section id="screen-quiz" class="screen">
+    <div class="progress-bar-track">
+      <div id="quiz-progress-bar" class="progress-bar-fill"></div>
+    </div>
     <div class="quiz-topbar">
       <span id="quiz-progress" class="badge badge-progress"></span>
       <span id="quiz-mode-badge" class="badge badge-mode"></span>
       <span id="quiz-category-badge" class="badge badge-category"></span>
       <span id="quiz-difficulty-badge" class="badge badge-difficulty"></span>
+      <span id="streak-badge" class="badge badge-streak" hidden></span>
     </div>
 
     <!-- 実践提案モードのときだけ表示するお客様状況カード -->
@@ -117,6 +128,8 @@
   ============================================================= -->
   <section id="screen-result" class="screen">
     <h2 class="result-heading">結果発表</h2>
+    <p id="new-record-banner" class="new-record-banner" hidden>🏆 自己ベスト更新！</p>
+    <p id="result-message" class="result-message"></p>
 
     <div class="card result-summary">
       <div class="result-stat">
@@ -128,6 +141,8 @@
         <span class="result-stat-label">正答率</span>
       </div>
     </div>
+
+    <p id="streak-summary" class="streak-summary"></p>
 
     <div class="card result-breakdown" id="result-breakdown">
       <div class="result-sub-stat">
@@ -152,6 +167,6 @@
 
 </div>
 
-<script src="script.js?v=2"></script>
+<script src="script.js?v=4"></script>
 </body>
 </html>

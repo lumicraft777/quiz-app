@@ -5,6 +5,13 @@
   box-sizing: border-box;
 }
 
+/* display:block/inline-blockなどを明示指定するクラス（.badge, .btn-primary等）が
+   hidden属性のUA既定スタイル（display:none）を上書きしてしまうのを防ぐ。
+   JSでelement.hidden = true/falseを使う全箇所に影響するため、最優先で効かせる */
+[hidden] {
+  display: none !important;
+}
+
 :root {
   --color-primary: #1e6f5c;
   --color-primary-dark: #14503f;
@@ -39,6 +46,11 @@ body {
 }
 .screen.active {
   display: block;
+  animation: screen-fade-in 0.28s ease;
+}
+@keyframes screen-fade-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 /* ============================================================
@@ -57,6 +69,64 @@ body {
   margin: 0;
   color: var(--color-muted);
   font-size: 0.9rem;
+}
+.best-record-text {
+  margin: 10px 0 0;
+  font-size: 0.85rem;
+  font-weight: bold;
+  color: var(--color-accent);
+}
+
+/* ============================================================
+   効果音トグルボタン（全画面共通・右上固定）
+   ============================================================= */
+.sound-toggle {
+  position: fixed;
+  top: 14px;
+  right: 14px;
+  z-index: 80;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  border: none;
+  background: #ffffff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  font-size: 1.15rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.sound-toggle:active {
+  transform: scale(0.92);
+}
+
+/* ============================================================
+   連続正解（ストリーク）トースト通知
+   ============================================================= */
+.streak-toast {
+  position: fixed;
+  top: 64px;
+  left: 50%;
+  transform: translateX(-50%) translateY(-12px);
+  background: linear-gradient(135deg, #ff9d3d, #ff5252);
+  color: #fff;
+  padding: 10px 20px;
+  border-radius: 999px;
+  font-weight: bold;
+  font-size: 0.95rem;
+  box-shadow: 0 8px 20px rgba(255, 90, 60, 0.4);
+  z-index: 90;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease, transform 0.25s ease;
+  white-space: nowrap;
+}
+.streak-toast.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+.badge-streak {
+  background: linear-gradient(135deg, #ff9d3d, #ff5252);
+  color: #fff;
 }
 
 /* ============================================================
@@ -191,6 +261,24 @@ body {
 }
 
 /* ============================================================
+   クイズ画面：進捗バー
+   ============================================================= */
+.progress-bar-track {
+  height: 8px;
+  background: #e3ece9;
+  border-radius: 999px;
+  overflow: hidden;
+  margin-bottom: 12px;
+}
+.progress-bar-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, var(--color-primary), #35b38a);
+  border-radius: 999px;
+  transition: width 0.45s ease;
+}
+
+/* ============================================================
    クイズ画面：上部バッジ
    ============================================================= */
 .quiz-topbar {
@@ -261,7 +349,7 @@ body {
 .choice-btn {
   display: flex;
   gap: 10px;
-  align-items: flex-start;
+  align-items: center;
   text-align: left;
   padding: 14px;
   border-radius: 10px;
@@ -269,6 +357,10 @@ body {
   background: #fafcfb;
   font-size: 0.98rem;
   cursor: pointer;
+  transition: transform 0.12s ease, border-color 0.15s, background 0.15s, opacity 0.2s;
+}
+.choice-btn:active {
+  transform: scale(0.98);
 }
 .choice-btn .choice-letter {
   flex: none;
@@ -282,10 +374,56 @@ body {
   justify-content: center;
   font-weight: bold;
   font-size: 0.85rem;
+  transition: background 0.15s;
 }
 .choice-btn.selected {
   border-color: var(--color-primary);
   background: #e8f4f0;
+}
+
+/* 回答後の正誤フィードバック（回答した瞬間、選択肢がその場で光る） */
+.choice-btn.correct-flash {
+  border-color: var(--color-correct);
+  background: #e6f6ea;
+  animation: correct-pop 0.4s ease;
+  cursor: default;
+}
+.choice-btn.correct-flash .choice-letter {
+  background: var(--color-correct);
+}
+.choice-btn.incorrect-flash {
+  border-color: var(--color-incorrect);
+  background: #fdeceb;
+  animation: shake-x 0.4s ease;
+  cursor: default;
+}
+.choice-btn.incorrect-flash .choice-letter {
+  background: var(--color-incorrect);
+}
+.choice-btn.dim-choice {
+  opacity: 0.45;
+  cursor: default;
+}
+.choice-btn .result-icon {
+  margin-left: auto;
+  font-size: 1.3rem;
+  font-weight: bold;
+  flex: none;
+}
+.choice-btn.correct-flash .result-icon { color: var(--color-correct); }
+.choice-btn.incorrect-flash .result-icon { color: var(--color-incorrect); }
+
+@keyframes correct-pop {
+  0% { transform: scale(1); }
+  45% { transform: scale(1.035); }
+  100% { transform: scale(1); }
+}
+@keyframes shake-x {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-7px); }
+  40% { transform: translateX(7px); }
+  60% { transform: translateX(-5px); }
+  80% { transform: translateX(5px); }
 }
 
 /* ============================================================
@@ -325,6 +463,29 @@ body {
 .result-heading {
   text-align: center;
   color: var(--color-primary-dark);
+}
+.result-message {
+  text-align: center;
+  font-size: 1.15rem;
+  font-weight: bold;
+  margin: 0 0 16px;
+  color: var(--color-primary-dark);
+}
+.new-record-banner {
+  text-align: center;
+  font-weight: bold;
+  color: #b4571b;
+  background: #fff1e6;
+  padding: 12px;
+  border-radius: 12px;
+  margin: 0 0 12px;
+  animation: correct-pop 0.5s ease;
+}
+.streak-summary {
+  text-align: center;
+  color: var(--color-muted);
+  font-size: 0.85rem;
+  margin: -4px 0 16px;
 }
 .result-summary {
   display: flex;
@@ -387,6 +548,26 @@ body {
 .muted-text {
   color: var(--color-muted);
   text-align: center;
+}
+
+/* ============================================================
+   紙吹雪（正解・高得点の演出）
+   JS側でDOMに生成し、アニメーション終了後に自動で取り除く
+   ============================================================= */
+.confetti-piece {
+  position: fixed;
+  top: -12px;
+  width: 8px;
+  height: 14px;
+  z-index: 999;
+  pointer-events: none;
+  opacity: 0.95;
+}
+@keyframes confetti-fall {
+  to {
+    transform: translateY(110vh) rotate(var(--rot, 480deg));
+    opacity: 0;
+  }
 }
 
 /* ============================================================

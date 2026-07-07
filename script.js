@@ -742,15 +742,214 @@ const state = {
   userAnswers: [],   // { question, chosenText, correct }
   selectedChoice: null,
   isReviewSession: false,
-  dataLoaded: false
+  dataLoaded: false,
+  currentStreak: 0,       // 現在の連続正解数
+  bestStreakThisSession: 0 // このセッション中の最大連続正解数
 };
 
 let knowledgeQuestions = [];
 let practiceQuestions = [];
 let loadedProducts = [];
 
+
+/* ================================================================
+   [パート6] 演出・効果音・記録（ゲーム的な楽しさのための仕掛け）
+   ----------------------------------------------------------------
+   ・正解/不正解を選択肢の色でその場でフィードバック
+   ・連続正解（ストリーク）をトースト通知＋紙吹雪で盛り上げる
+   ・Web Audio APIでその場で音を合成（音声ファイルは使わない）
+   ・結果画面のスコアをカウントアップ演出
+   ・正答率・連続正解の自己ベストをlocalStorageに保存して次回と比較
+   ================================================================ */
+
+const BEST_RATE_KEY = "batteryQuiz_bestRate";
+const BEST_STREAK_KEY = "batteryQuiz_bestStreak";
+const SOUND_PREF_KEY = "batteryQuiz_soundEnabled";
+
+let soundEnabled = true;
+let audioCtx = null;
+
+// ---- 効果音（Web Audio APIでその場で音を生成する。外部音源ファイル不要） ----
+function loadSoundPreference() {
+  const saved = localStorage.getItem(SOUND_PREF_KEY);
+  soundEnabled = saved === null ? true : saved === "true";
+  updateSoundToggleUI();
+}
+
+function toggleSound() {
+  soundEnabled = !soundEnabled;
+  localStorage.setItem(SOUND_PREF_KEY, String(soundEnabled));
+  updateSoundToggleUI();
+}
+
+function updateSoundToggleUI() {
+  const btn = document.getElementById("btn-sound-toggle");
+  if (btn) btn.textContent = soundEnabled ? "🔊" : "🔇";
+}
+
+// AudioContextはユーザー操作（クリック）の後でないと開始できないブラウザが多いため、
+// 実際に音を鳴らすタイミングで初めて生成・再開する
+function ensureAudioContext() {
+  if (!soundEnabled) return null;
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) return null;
+  if (!audioCtx) audioCtx = new AC();
+  if (audioCtx.state === "suspended") audioCtx.resume();
+  return audioCtx;
+}
+
+// 指定した周波数・長さの音を1つ鳴らす（sine波などをオシレーターで合成）
+function playTone(freq, startOffset, duration, waveType, volume) {
+  const ctx = ensureAudioContext();
+  if (!ctx) return;
+
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = waveType || "sine";
+  osc.frequency.value = freq;
+
+  const startTime = ctx.currentTime + startOffset;
+  gain.gain.setValueAtTime(0, startTime);
+  gain.gain.linearRampToValueAtTime(volume, startTime + 0.02);
+  gain.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
+
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+  osc.start(startTime);
+  osc.stop(startTime + duration + 0.02);
+}
+
+function playCorrectSound() {
+  playTone(660, 0, 0.12, "sine", 0.18);
+  playTone(880, 0.09, 0.18, "sine", 0.18);
+}
+
+function playWrongSound() {
+  playTone(220, 0, 0.22, "sawtooth", 0.12);
+}
+
+// 連続正解数が多いほど、鳴らす音符の数が増えて盛り上がる
+function playStreakSound(streak) {
+  const notes = [523.25, 659.25, 783.99, 987.77, 1174.66]; // ド・ミ・ソ・シ・レ
+  const n = Math.min(streak, notes.length);
+  for (let i = 0; i < n; i++) {
+    playTone(notes[i], i * 0.09, 0.16, "triangle", 0.15);
+  }
+}
+
+function playFanfare() {
+  const notes = [523.25, 659.25, 783.99, 1046.5];
+  notes.forEach((freq, i) => playTone(freq, i * 0.12, 0.32, "triangle", 0.2));
+}
+
+// ---- 紙吹雪演出 ----
+const CONFETTI_COLORS = ["#ff7a3d", "#1e6f5c", "#ffd166", "#4d96ff", "#ff5252", "#35b38a"];
+
+function launchConfetti(count) {
+  count = count || 40;
+  const pieces = [];
+  const frag = document.createDocumentFragment();
+
+  for (let i = 0; i < count; i++) {
+    const el = document.createElement("div");
+    el.className = "confetti-piece";
+    const duration = 1.6 + Math.random() * 1.2;
+    const delay = Math.random() * 0.3;
+    el.style.left = `${Math.random() * 100}vw`;
+    el.style.background = CONFETTI_COLORS[Math.floor(Math.random() * CONFETTI_COLORS.length)];
+    el.style.setProperty("--rot", `${360 + Math.random() * 360}deg`);
+    el.style.animation = `confetti-fall ${duration}s cubic-bezier(0.25,0.46,0.45,0.94) ${delay}s forwards`;
+    if (Math.random() > 0.5) el.style.borderRadius = "50%";
+    frag.appendChild(el);
+    pieces.push(el);
+  }
+
+  document.body.appendChild(frag);
+  setTimeout(() => pieces.forEach((p) => p.remove()), 3200);
+}
+
+// ---- 連続正解（ストリーク）のトースト通知 ----
+let streakToastTimer = null;
+
+function showStreakToast(streak) {
+  const toast = document.getElementById("streak-toast");
+  if (!toast) return;
+
+  toast.textContent = `🔥 ${streak}連続正解！`;
+  toast.hidden = false;
+  void toast.offsetWidth; // 再アニメーションさせるための強制リフロー
+  toast.classList.add("show");
+
+  clearTimeout(streakToastTimer);
+  streakToastTimer = setTimeout(() => {
+    toast.classList.remove("show");
+    setTimeout(() => { toast.hidden = true; }, 300);
+  }, 1400);
+}
+
+function updateStreakBadge() {
+  const badge = document.getElementById("streak-badge");
+  if (!badge) return;
+  if (state.currentStreak >= 2) {
+    badge.textContent = `🔥 ${state.currentStreak}連続`;
+    badge.hidden = false;
+  } else {
+    badge.hidden = true;
+  }
+}
+
+// ---- 数値のカウントアップ演出（結果画面のスコア表示用） ----
+function animateCountUp(el, endValue, formatFn, duration) {
+  const startTime = performance.now();
+  function tick(now) {
+    const progress = Math.min((now - startTime) / duration, 1);
+    const eased = 1 - Math.pow(1 - progress, 3); // ease-out
+    const current = Math.round(endValue * eased);
+    el.textContent = formatFn(current);
+    if (progress < 1) requestAnimationFrame(tick);
+    else el.textContent = formatFn(endValue);
+  }
+  requestAnimationFrame(tick);
+}
+
+// ---- 自己ベスト記録（localStorageで端末ごとに保存） ----
+function getBestRate() {
+  return Number(localStorage.getItem(BEST_RATE_KEY) || 0);
+}
+function getBestStreak() {
+  return Number(localStorage.getItem(BEST_STREAK_KEY) || 0);
+}
+
+// スタート画面に自己ベストを表示する
+function renderBestRecordOnStart() {
+  const el = document.getElementById("best-record-text");
+  if (!el) return;
+  const bestRate = getBestRate();
+  const bestStreak = getBestStreak();
+  if (bestRate === 0 && bestStreak === 0) {
+    el.textContent = "";
+    return;
+  }
+  const parts = [];
+  if (bestRate > 0) parts.push(`自己ベスト正答率 ${bestRate}%`);
+  if (bestStreak > 0) parts.push(`最大連続正解 ${bestStreak}問`);
+  el.textContent = "🏆 " + parts.join(" ／ ");
+}
+
+// 結果に応じた一言メッセージ
+function getResultMessage(rate) {
+  if (rate === 100) return "🎉 パーフェクト！完璧です！";
+  if (rate >= 80) return "✨ 素晴らしい成績です！";
+  if (rate >= 60) return "👍 いい調子！あと少しで上級者です";
+  if (rate >= 40) return "💪 もう一歩！復習して伸ばしましょう";
+  return "📚 まずは基礎から復習していきましょう";
+}
+
 // ---- 起動時の初期化 ----
 async function initApp() {
+  loadSoundPreference();
+  document.getElementById("btn-sound-toggle").addEventListener("click", toggleSound);
+  renderBestRecordOnStart();
   setupStartScreen();
   showScreen("screen-start");
   await loadAllData();
@@ -894,6 +1093,8 @@ function beginQuizSession() {
   state.currentIndex = 0;
   state.userAnswers = [];
   state.isReviewSession = false;
+  state.currentStreak = 0;
+  state.bestStreakThisSession = 0;
 
   showScreen("screen-quiz");
   renderQuestion();
@@ -962,6 +1163,10 @@ function renderQuestion() {
     q.mode === "knowledge" ? "知識問題" : "実践提案";
   document.getElementById("quiz-category-badge").textContent = q.category;
   document.getElementById("quiz-difficulty-badge").textContent = q.difficulty;
+  updateStreakBadge();
+
+  const progressPct = Math.round((state.currentIndex / state.sessionQuestions.length) * 100);
+  document.getElementById("quiz-progress-bar").style.width = `${progressPct}%`;
 
   document.getElementById("question-text").textContent = q.question;
 
@@ -1003,6 +1208,7 @@ function renderChoices(choices) {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "choice-btn";
+    btn.dataset.choiceText = choiceText; // 回答確定時に正誤判定・色分けするために保持
 
     const letterSpan = document.createElement("span");
     letterSpan.className = "choice-letter";
@@ -1025,19 +1231,66 @@ function renderChoices(choices) {
   });
 }
 
+// 選択肢ボタンに正誤アイコンを追加する（✓/✗）
+function addResultIcon(btn, icon) {
+  const span = document.createElement("span");
+  span.className = "result-icon";
+  span.textContent = icon;
+  btn.appendChild(span);
+}
+
 // ---- 回答を確定して解説画面へ ----
+// 選択肢がその場で正誤の色に光ってから解説画面に切り替わるよう、
+// 少しだけ間（0.7秒）を置く。この「即時フィードバック」がゲームらしい
+// 気持ちよさ（ドーパミン）を生む一番のポイントになる。
 function submitAnswer() {
   const q = state.sessionQuestions[state.currentIndex];
-  const isCorrect = state.selectedChoice === q.answer;
+  const chosenText = state.selectedChoice;
+  const isCorrect = chosenText === q.answer;
 
-  state.userAnswers.push({
-    question: q,
-    chosenText: state.selectedChoice,
-    correct: isCorrect
+  document.getElementById("btn-answer").disabled = true;
+
+  const buttons = document.querySelectorAll("#choices-list .choice-btn");
+  buttons.forEach((btn) => {
+    btn.disabled = true;
+    const label = btn.dataset.choiceText;
+    if (label === q.answer) {
+      btn.classList.add("correct-flash");
+      addResultIcon(btn, "✓");
+    } else if (label === chosenText) {
+      btn.classList.add("incorrect-flash");
+      addResultIcon(btn, "✗");
+    } else {
+      btn.classList.add("dim-choice");
+    }
   });
 
-  renderExplainScreen(q, state.selectedChoice, isCorrect);
-  showScreen("screen-explain");
+  if (isCorrect) {
+    state.currentStreak++;
+    state.bestStreakThisSession = Math.max(state.bestStreakThisSession, state.currentStreak);
+    updateStreakBadge();
+    if (state.currentStreak >= 2) {
+      // 連続正解中は、単発の正解音より盛り上がる上昇アルペジオを鳴らす
+      playStreakSound(state.currentStreak);
+      showStreakToast(state.currentStreak);
+    } else {
+      playCorrectSound();
+    }
+    if (state.currentStreak >= 3 && state.currentStreak % 3 === 0) {
+      launchConfetti(24);
+    }
+  } else {
+    state.currentStreak = 0;
+    playWrongSound();
+    updateStreakBadge();
+  }
+
+  state.userAnswers.push({ question: q, chosenText, correct: isCorrect });
+
+  setTimeout(() => {
+    renderExplainScreen(q, chosenText, isCorrect);
+    showScreen("screen-explain");
+  }, 700);
 }
 
 function renderExplainScreen(q, chosenText, isCorrect) {
@@ -1076,14 +1329,44 @@ function renderResultScreen() {
   const correctCount = state.userAnswers.filter((a) => a.correct).length;
   const rate = total > 0 ? Math.round((correctCount / total) * 100) : 0;
 
-  document.getElementById("result-score").textContent = `${correctCount} / ${total}`;
-  document.getElementById("result-rate").textContent = `${rate}%`;
+  // スコア・正答率は0からカウントアップさせて演出する
+  const scoreEl = document.getElementById("result-score");
+  const rateEl = document.getElementById("result-rate");
+  animateCountUp(scoreEl, correctCount, (v) => `${v} / ${total}`, 700);
+  animateCountUp(rateEl, rate, (v) => `${v}%`, 700);
+
+  document.getElementById("result-message").textContent = getResultMessage(rate);
 
   const knowledgeAnswers = state.userAnswers.filter((a) => a.question.mode === "knowledge");
   const practiceAnswers = state.userAnswers.filter((a) => a.question.mode === "practice");
 
   document.getElementById("result-knowledge-rate").textContent = formatRate(knowledgeAnswers);
   document.getElementById("result-practice-rate").textContent = formatRate(practiceAnswers);
+
+  document.getElementById("streak-summary").textContent =
+    `この回の最大連続正解：${state.bestStreakThisSession}問`;
+
+  // 自己ベスト（正答率・連続正解）を更新できたかチェックする
+  const prevBestRate = getBestRate();
+  const prevBestStreak = getBestStreak();
+  let isNewRecord = false;
+  if (rate > prevBestRate) {
+    localStorage.setItem(BEST_RATE_KEY, String(rate));
+    isNewRecord = true;
+  }
+  if (state.bestStreakThisSession > prevBestStreak) {
+    localStorage.setItem(BEST_STREAK_KEY, String(state.bestStreakThisSession));
+    isNewRecord = true;
+  }
+  document.getElementById("new-record-banner").hidden = !isNewRecord;
+
+  // 高得点・自己ベスト更新時は紙吹雪でお祝いする
+  if (rate === 100) {
+    playFanfare();
+    setTimeout(() => launchConfetti(80), 150);
+  } else if (isNewRecord || rate >= 80) {
+    setTimeout(() => launchConfetti(isNewRecord ? 60 : 40), 150);
+  }
 
   const wrongList = document.getElementById("wrong-list");
   wrongList.innerHTML = "";
@@ -1123,6 +1406,8 @@ function startReviewSession() {
   state.currentIndex = 0;
   state.userAnswers = [];
   state.isReviewSession = true;
+  state.currentStreak = 0;
+  state.bestStreakThisSession = 0;
 
   showScreen("screen-quiz");
   renderQuestion();
@@ -1143,6 +1428,7 @@ function resetToStart() {
   );
   document.getElementById("btn-start").disabled = true;
   document.getElementById("start-warning").textContent = "";
+  renderBestRecordOnStart();
 
   showScreen("screen-start");
 }
