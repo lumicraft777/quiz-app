@@ -1,0 +1,1150 @@
+/* ================================================================
+   蓄電池メーカー比較クイズ - script.js（スプレッドシート連携版）
+   ----------------------------------------------------------------
+   このファイルは大きく5つのパートに分かれています。
+   [パート1] 設定（スプレッドシートID・シート構成）
+   [パート2] スプレッドシート読み込み・CSVパース・列名マッピング
+   [パート3] 知識問題の自動生成ロジック
+   [パート4] 実践提案問題の自動生成ロジック
+   [パート5] 画面制御・クイズ進行ロジック（アプリ本体）
+
+   ★ データはすべてGoogleスプレッドシートから読み込みます。
+     アプリ内にはデータを一切埋め込んでいません。
+     スプレッドシートを編集 → アプリを再読み込みするだけで
+     問題が最新データから自動生成されます。
+
+   ★ 注意：Googleの仕様上、file:// で直接HTMLを開くと
+     スプレッドシートの読み込みがブロックされます（CORS制限）。
+     必ずローカルサーバー経由（http://localhost/...）で開いてください。
+     例：フォルダ内で  python -m http.server 8000  を実行し
+         http://localhost:8000 をブラウザで開く
+   ================================================================ */
+
+
+/* ================================================================
+   [パート1] 設定
+   ================================================================ */
+
+// 読み込むGoogleスプレッドシートのID（URLの /d/ と /edit の間の文字列）
+const SPREADSHEET_ID = "13746scYc9hBgqWgvCyXuCS9olrbaxWqsIvDpLiwjtBw";
+
+// 読み込むシートの一覧。
+// 将来「屋根の特徴」「地域ごとの補助金」「エコキュート」など
+// 別ジャンルのシートを追加したくなったら、ここに追記していく想定です。
+//   name  : 画面表示やログで使う名前
+//   sheet : スプレッドシート下部のタブ名（"" なら先頭のシートを読む）
+//   type  : データの種類。現状は "battery"（蓄電池メーカー比較表）のみ対応。
+//           新ジャンルを追加する場合は、そのtype用の問題生成関数を
+//           パート3/4に追加し、initApp内で分岐させてください。
+const SHEET_CONFIG = [
+  { name: "蓄電池メーカー比較", sheet: "", type: "battery" }
+];
+
+// スプレッドシートの列名 → アプリ内部のキー名 の対応表。
+// 列の並び順が変わっても、この見出し名で照合するので問題ありません。
+const COLUMN_MAP = {
+  "メーカー名": "maker",
+  "製品名・シリーズ名": "series",
+  "型番": "model",
+  "蓄電容量/kWh": "capacityKwh",
+  "実効容量/kWh": "usableCapacityKwh",
+  "電池材料・種類": "batteryMaterial",
+  "蓄電池タイプ": "batteryType",
+  "負荷タイプ": "loadType",
+  "対応年数/設計寿命": "lifespan",
+  "製品保証年数": "warrantyYears",
+  "容量保証年数": "capacityWarrantyYears",
+  "自然災害補償": "disasterCompensation",
+  "停電時出力": "outageOutput",
+  "定格出力": "ratedOutput",
+  "太陽光連携": "solarLink",
+  "V2H対応": "v2h",
+  "AI制御/HEMS対応": "aiHems",
+  "屋内/屋外設置": "installation",
+  "サイズ": "size",
+  "重量": "weight",
+  "主な特徴": "feature",
+  "メリット": "merit",
+  "デメリット": "demerit",
+  "向いている家庭": "suitableFamily",
+  "営業時の訴求ポイント": "salesPoint",
+  "公式URL": "url",
+  "参照資料名": "sourceDoc",
+  "情報確認日": "checkedDate",
+  "備考": "note"
+};
+
+
+/* ================================================================
+   [パート2] スプレッドシート読み込み・CSVパース・列名マッピング
+   ================================================================ */
+
+// gviz エンドポイントは共有リンク設定のシートをCSVとして返してくれる
+function buildCsvUrl(sheetName) {
+  let url = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?tqx=out:csv`;
+  if (sheetName) {
+    url += `&sheet=${encodeURIComponent(sheetName)}`;
+  }
+  return url;
+}
+
+// ダブルクォート・セル内カンマ・セル内改行に対応した簡易CSVパーサー
+function parseCsv(text) {
+  const rows = [];
+  let row = [];
+  let cell = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+
+    if (inQuotes) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') {
+          cell += '"'; // "" はエスケープされた1つの引用符
+          i++;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        cell += ch;
+      }
+    } else {
+      if (ch === '"') {
+        inQuotes = true;
+      } else if (ch === ",") {
+        row.push(cell);
+        cell = "";
+      } else if (ch === "\n" || ch === "\r") {
+        if (ch === "\r" && text[i + 1] === "\n") i++; // CRLF対応
+        row.push(cell);
+        cell = "";
+        rows.push(row);
+        row = [];
+      } else {
+        cell += ch;
+      }
+    }
+  }
+  // 最終行の処理
+  if (cell !== "" || row.length > 0) {
+    row.push(cell);
+    rows.push(row);
+  }
+  return rows;
+}
+
+// CSVの行列データを製品オブジェクトの配列に変換する。
+// ・見出し行は「メーカー名」を含む行を自動検出（先頭に説明行があってもOK）
+// ・メーカー名または製品名が空の行はスキップ（ランキング等のメモ行対策）
+// ・見出し行が繰り返し貼り付けられていてもスキップ
+function rowsToProducts(rows) {
+  // 見出し行を探す
+  let headerRowIndex = -1;
+  for (let i = 0; i < Math.min(rows.length, 10); i++) {
+    if (rows[i].some((c) => c.trim() === "メーカー名")) {
+      headerRowIndex = i;
+      break;
+    }
+  }
+  if (headerRowIndex === -1) {
+    return { products: [], error: "見出し行（「メーカー名」列）が見つかりません。" };
+  }
+
+  const headers = rows[headerRowIndex].map((h) => h.trim());
+  // 列番号 → 内部キー名 の対応を作る
+  const colKeys = headers.map((h) => COLUMN_MAP[h] || null);
+
+  const products = [];
+  for (let i = headerRowIndex + 1; i < rows.length; i++) {
+    const cells = rows[i];
+    const obj = {};
+    colKeys.forEach((key, idx) => {
+      if (!key) return;
+      obj[key] = (cells[idx] || "").trim();
+    });
+
+    // メーカー名・製品名がない行はデータ行ではないのでスキップ
+    if (!obj.maker || !obj.series) continue;
+    // 貼り付け時に見出し行が混ざっていた場合もスキップ
+    if (obj.maker === "メーカー名") continue;
+
+    products.push(obj);
+  }
+
+  return { products, error: null };
+}
+
+// スプレッドシートを読み込んで製品配列を返す
+async function loadProductsFromSheet(sheetConf) {
+  const url = buildCsvUrl(sheetConf.sheet);
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error(`スプレッドシートの取得に失敗しました（HTTP ${res.status}）`);
+  }
+  const text = await res.text();
+  if (!text.trim()) {
+    return []; // シートが空
+  }
+  const { products, error } = rowsToProducts(parseCsv(text));
+  if (error) {
+    throw new Error(error);
+  }
+  return products;
+}
+
+
+/* ================================================================
+   共通ユーティリティ
+   ================================================================ */
+
+let questionIdCounter = 1;
+function nextQuestionId(prefix) {
+  return prefix + String(questionIdCounter++).padStart(3, "0");
+}
+
+// 「不明」「空欄」「未確認」「公式未確認」を判定する。
+// これらの値は問題化の対象にしない。
+function isUnknownValue(value) {
+  if (value === undefined || value === null) return true;
+  const s = String(value).trim();
+  if (s === "") return true;
+  if (s === "不明" || s === "未確認" || s === "－" || s === "-") return true;
+  if (s.startsWith("不明")) return true;
+  if (s.includes("公式未確認")) return true;
+  return false;
+}
+
+// 「あり/対応/可/○」系かどうか・「なし/非対応/不可/×」系かどうかの判定
+function isPositiveValue(value) {
+  if (isUnknownValue(value)) return false;
+  const s = String(value).trim();
+  if (isNegativeValue(s)) return false;
+  return /あり|対応|可|○|◯|〇|有/.test(s);
+}
+function isNegativeValue(value) {
+  if (isUnknownValue(value)) return false;
+  const s = String(value).trim();
+  return /^(なし|非対応|不可|無|×|✕)/.test(s) || /非対応|連携できない|対応していない/.test(s);
+}
+
+// 文字列の先頭付近から最初の数値を取り出す（"16.6kWh" → 16.6、"15年" → 15）
+function parseLeadingNumber(value) {
+  if (isUnknownValue(value)) return null;
+  const m = String(value).replace(/,/g, "").match(/(\d+(\.\d+)?)/);
+  return m ? Number(m[1]) : null;
+}
+
+// 配列をシャッフルして新しい配列を返す（元の配列は壊さない）
+function shuffleArray(arr) {
+  const copy = arr.slice();
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
+}
+
+function pickRandomN(arr, n) {
+  return shuffleArray(arr).slice(0, n);
+}
+
+function makerLabel(p) {
+  return `${p.maker} ${p.series}`;
+}
+
+// 「」でくくられた文章が二重括弧にならないよう外側の記号を外す
+function stripOuterQuotes(text) {
+  const s = String(text).trim();
+  if (s.startsWith("「") && s.endsWith("」")) {
+    return s.slice(1, -1);
+  }
+  return s;
+}
+
+
+/* ================================================================
+   [パート3] 知識問題の自動生成ロジック
+   ----------------------------------------------------------------
+   スプレッドシートの各行から、以下のルールで4択問題を作ります。
+   ・値が「不明」「空欄」「公式未確認」の項目は問題化しない
+   ・ダミー選択肢は他の行の異なる値から作る（3つ未満なら生成しない）
+   ・解説には「主な特徴」「メリット」「営業時の訴求ポイント」を必ず含める
+   ================================================================ */
+
+// 解説文を組み立てる。特徴・メリット・訴求ポイントのうち
+// スプレッドシートに値があるものだけを使う。
+function buildKnowledgeExplanation(p) {
+  const parts = [];
+  if (!isUnknownValue(p.feature)) {
+    parts.push(`${p.maker}「${p.series}」は、${stripOuterQuotes(p.feature)}という特徴があります。`);
+  }
+  if (!isUnknownValue(p.merit)) {
+    parts.push(`メリットとしては「${stripOuterQuotes(p.merit)}」という点が挙げられます。`);
+  }
+  if (!isUnknownValue(p.salesPoint)) {
+    parts.push(`営業時には「${stripOuterQuotes(p.salesPoint)}」という伝え方が効果的です。`);
+  }
+  if (parts.length === 0) {
+    parts.push(`${p.maker}「${p.series}」の詳細はスプレッドシートの元データを確認してください。`);
+  }
+  return parts.join("");
+}
+
+/* ---- 3-1. 「製品→フィールドの値」を問う問題（例：保証年数は？） ---- */
+function genFieldQuestions(products, field, questionTextFn, category, difficulty) {
+  const questions = [];
+
+  products.forEach((p) => {
+    const correctRaw = p[field];
+    if (isUnknownValue(correctRaw)) return; // 不明な項目は問題化しない
+
+    const correctText = String(correctRaw).trim();
+
+    // 他の製品から「異なる値」を集めてダミー選択肢の候補にする
+    const seen = new Set([correctText]);
+    const distractorPool = [];
+    products.forEach((other) => {
+      if (other === p) return;
+      const v = other[field];
+      if (isUnknownValue(v)) return;
+      const t = String(v).trim();
+      if (seen.has(t)) return;
+      seen.add(t);
+      distractorPool.push(t);
+    });
+
+    if (distractorPool.length < 3) return; // 選択肢が足りない場合は生成しない
+
+    const distractors = pickRandomN(distractorPool, 3);
+    const choices = shuffleArray([correctText, ...distractors]);
+
+    questions.push({
+      id: nextQuestionId("q"),
+      mode: "knowledge",
+      category,
+      difficulty,
+      question: questionTextFn(p),
+      customerScenario: "",
+      choices,
+      answer: correctText,
+      explanation: buildKnowledgeExplanation(p),
+      sourceManufacturer: p.maker,
+      sourceProduct: p.series
+    });
+  });
+
+  return questions;
+}
+
+/* ---- 3-2. 「文章→メーカー・製品名」を当てる逆引き問題 ---- */
+function genReverseQuestions(products, field, questionPrefix, category, difficulty, answerType) {
+  const questions = [];
+
+  products.forEach((p) => {
+    if (isUnknownValue(p[field])) return;
+    const stem = stripOuterQuotes(p[field]);
+
+    const correctAnswer = answerType === "product" ? makerLabel(p) : p.maker;
+
+    const distractorPool = [];
+    const seen = new Set([correctAnswer]);
+    products.forEach((other) => {
+      if (other === p) return;
+      const label = answerType === "product" ? makerLabel(other) : other.maker;
+      if (seen.has(label)) return;
+      seen.add(label);
+      distractorPool.push(label);
+    });
+
+    if (distractorPool.length < 3) return;
+
+    const distractors = pickRandomN(distractorPool, 3);
+    const choices = shuffleArray([correctAnswer, ...distractors]);
+
+    questions.push({
+      id: nextQuestionId("q"),
+      mode: "knowledge",
+      category,
+      difficulty,
+      question: `${questionPrefix}\n${stem}`,
+      customerScenario: "",
+      choices,
+      answer: correctAnswer,
+      explanation: buildKnowledgeExplanation(p),
+      sourceManufacturer: p.maker,
+      sourceProduct: p.series
+    });
+  });
+
+  return questions;
+}
+
+/* ---- 3-3. 「あり/なし」項目の問題（V2H・災害補償・AI/HEMSなど） ---- */
+function genBooleanQuestions(products, field, questionTexts, category, difficulty) {
+  const questions = [];
+
+  const trueList = products.filter((p) => isPositiveValue(p[field]));
+  const falseList = products.filter((p) => isNegativeValue(p[field]));
+
+  // 「あり」製品を正解にして「なし」製品をダミーにする
+  if (trueList.length >= 1 && falseList.length >= 3) {
+    trueList.forEach((correctP) => {
+      const distractors = pickRandomN(falseList, 3);
+      questions.push(buildBooleanQuestion(correctP, distractors, questionTexts.positive, category, difficulty));
+    });
+  }
+
+  // 「なし」製品を正解にして「あり」製品をダミーにする
+  if (falseList.length >= 1 && trueList.length >= 3) {
+    falseList.forEach((correctP) => {
+      const distractors = pickRandomN(trueList, 3);
+      questions.push(buildBooleanQuestion(correctP, distractors, questionTexts.negative, category, difficulty));
+    });
+  }
+
+  return questions;
+}
+
+function buildBooleanQuestion(correctP, distractorPs, questionText, category, difficulty) {
+  const choices = shuffleArray([makerLabel(correctP), ...distractorPs.map(makerLabel)]);
+  return {
+    id: nextQuestionId("q"),
+    mode: "knowledge",
+    category,
+    difficulty,
+    question: questionText,
+    customerScenario: "",
+    choices,
+    answer: makerLabel(correctP),
+    explanation: buildKnowledgeExplanation(correctP),
+    sourceManufacturer: correctP.maker,
+    sourceProduct: correctP.series
+  };
+}
+
+/* ---- 3-4. 複数メーカー比較問題（数値の最大・最小を当てる上級問題） ---- */
+function genExtremeQuestion(products, field, mode, questionText, category, difficulty) {
+  const valid = products
+    .map((p) => ({ p, num: parseLeadingNumber(p[field]) }))
+    .filter((x) => x.num !== null);
+  if (valid.length < 4) return null;
+
+  const sorted = valid.slice().sort((a, b) => (mode === "max" ? b.num - a.num : a.num - b.num));
+  const extremeVal = sorted[0].num;
+  const tied = sorted.filter((x) => x.num === extremeVal);
+  if (tied.length !== 1) return null; // 同値タイの場合は問題として成立しない
+
+  const correctP = tied[0].p;
+  const others = pickRandomN(valid.filter((x) => x.p !== correctP), 3);
+  if (others.length < 3) return null;
+
+  const choices = shuffleArray([makerLabel(correctP), ...others.map((x) => makerLabel(x.p))]);
+
+  return {
+    id: nextQuestionId("q"),
+    mode: "knowledge",
+    category,
+    difficulty,
+    question: questionText,
+    customerScenario: "",
+    choices,
+    answer: makerLabel(correctP),
+    explanation:
+      buildKnowledgeExplanation(correctP) +
+      `参考値：${correctP[field]}。` +
+      `比較問題では、営業トークで「どこが一番強みか」を数字で語れるようにしておくことが大切です。`,
+    sourceManufacturer: correctP.maker,
+    sourceProduct: correctP.series
+  };
+}
+
+/* ---- 3-5. 蓄電池シート用：知識問題プールの組み立て ---- */
+function generateKnowledgeQuestions(products) {
+  let qs = [];
+
+  // ===== 初級：基本情報 =====
+  qs = qs.concat(genFieldQuestions(products, "warrantyYears",
+    (p) => `${p.maker}「${p.series}」の製品保証年数として正しいものはどれ？`, "保証", "初級"));
+  qs = qs.concat(genFieldQuestions(products, "capacityWarrantyYears",
+    (p) => `${p.maker}「${p.series}」の容量保証として正しいものはどれ？`, "保証", "初級"));
+  qs = qs.concat(genFieldQuestions(products, "capacityKwh",
+    (p) => `${p.maker}「${p.series}」の蓄電容量(kWh)として正しいものはどれ？`, "容量", "初級"));
+  qs = qs.concat(genFieldQuestions(products, "usableCapacityKwh",
+    (p) => `${p.maker}「${p.series}」の実効容量(kWh)として正しいものはどれ？`, "容量", "初級"));
+  qs = qs.concat(genFieldQuestions(products, "batteryMaterial",
+    (p) => `${p.maker}「${p.series}」に採用されている電池材料・種類はどれ？`, "電池材料", "初級"));
+  qs = qs.concat(genFieldQuestions(products, "batteryType",
+    (p) => `${p.maker}「${p.series}」の蓄電池タイプ（ハイブリッド型/単機能型など）はどれ？`, "メーカー比較", "初級"));
+
+  // ===== 中級：特徴・負荷タイプ・停電時出力など =====
+  qs = qs.concat(genFieldQuestions(products, "loadType",
+    (p) => `${p.maker}「${p.series}」の負荷タイプ（停電時に使える範囲）はどれ？`, "停電対策", "中級"));
+  qs = qs.concat(genFieldQuestions(products, "outageOutput",
+    (p) => `${p.maker}「${p.series}」の停電時出力として正しいものはどれ？`, "停電対策", "中級"));
+  qs = qs.concat(genFieldQuestions(products, "lifespan",
+    (p) => `${p.maker}「${p.series}」の対応年数/設計寿命として正しいものはどれ？`, "保証", "中級"));
+  qs = qs.concat(genFieldQuestions(products, "solarLink",
+    (p) => `${p.maker}「${p.series}」の太陽光連携について正しい説明はどれ？`, "太陽光連携", "中級"));
+  qs = qs.concat(genFieldQuestions(products, "installation",
+    (p) => `${p.maker}「${p.series}」の設置条件（屋内/屋外）として正しいものはどれ？`, "メーカー比較", "中級"));
+
+  qs = qs.concat(genReverseQuestions(products, "suitableFamily",
+    "次のような家庭に向いている製品はどれ？", "メリット/デメリット", "中級", "product"));
+  qs = qs.concat(genReverseQuestions(products, "merit",
+    "次のメリットが特徴とされている製品はどれ？", "メリット/デメリット", "中級", "maker"));
+  qs = qs.concat(genReverseQuestions(products, "salesPoint",
+    "次の営業トークが訴求ポイントとして合う製品はどれ？", "営業トーク", "中級", "maker"));
+  qs = qs.concat(genReverseQuestions(products, "feature",
+    "次の特徴を持つ製品はどれ？", "メーカー比較", "中級", "maker"));
+
+  // ===== 上級：デメリット・複数メーカー比較 =====
+  qs = qs.concat(genReverseQuestions(products, "demerit",
+    "次のデメリット（注意点）が指摘されている製品はどれ？", "メリット/デメリット", "上級", "maker"));
+
+  qs = qs.concat(genBooleanQuestions(products, "v2h", {
+    positive: "V2H（電気自動車との連携）に対応しているのはどれ？",
+    negative: "V2H（電気自動車との連携）に対応していないのはどれ？"
+  }, "V2H", "中級"));
+
+  qs = qs.concat(genBooleanQuestions(products, "aiHems", {
+    positive: "AI制御・HEMS連携に対応しているのはどれ？",
+    negative: "AI制御・HEMS連携に対応していないのはどれ？"
+  }, "メーカー比較", "中級"));
+
+  qs = qs.concat(genBooleanQuestions(products, "disasterCompensation", {
+    positive: "自然災害補償が付帯しているのはどれ？",
+    negative: "自然災害補償が付帯していないのはどれ？"
+  }, "保証", "中級"));
+
+  const extremeCandidates = [
+    genExtremeQuestion(products, "capacityKwh", "max", "蓄電容量(kWh)が最も大きいのはどれ？", "メーカー比較", "上級"),
+    genExtremeQuestion(products, "capacityKwh", "min", "蓄電容量(kWh)が最も小さいのはどれ？", "メーカー比較", "上級"),
+    genExtremeQuestion(products, "warrantyYears", "max", "製品保証年数が最も長いのはどれ？", "保証", "上級"),
+    genExtremeQuestion(products, "warrantyYears", "min", "製品保証年数が最も短いのはどれ？", "保証", "上級")
+  ];
+  extremeCandidates.forEach((q) => { if (q) qs.push(q); });
+
+  return qs;
+}
+
+
+/* ================================================================
+   [パート4] 実践提案問題の自動生成ロジック
+   ----------------------------------------------------------------
+   スプレッドシートの「向いている家庭」「営業時の訴求ポイント」
+   「デメリット」列だけを材料にして、お客様状況→最適提案を選ぶ
+   問題を自動生成します（シートにない情報は使いません）。
+
+   仕組み：
+   1. 各製品の「向いている家庭」等の文章からキーワードで
+      重視カテゴリ（停電対策/電気代削減/…）を推定する
+   2. お客様状況カード＝「向いている家庭」の内容をそのまま提示
+   3. 正解＝その製品、ダミー＝重視カテゴリが異なる他製品
+      （カテゴリが同じ製品はダミーにしない＝正解が曖昧にならない）
+   4. 解説＝正解の理由（訴求ポイント）＋他の選択肢が弱い理由
+      （各製品のデメリット）＋注意点（正解製品のデメリット）
+   ================================================================ */
+
+// 実践カテゴリごとの判定キーワード。
+// 「向いている家庭」（重み2）と「メリット・主な特徴」（重み1）の中で
+// キーワードが何回ヒットしたかを数え、最もスコアが高いカテゴリに分類する。
+// （単純な優先順判定だと「初期費用を抑えて最低限の停電対策をしたい家庭」が
+//   停電対策に誤分類されるため、スコアリング方式にしている）
+const PRACTICE_CATEGORY_KEYWORDS = {
+  "EV/V2H": ["EV", "V2H", "トライブリッド", "電気自動車"],
+  "停電対策": ["停電", "災害", "防災", "バックアップ", "全負荷", "普段通り"],
+  "電気代削減": ["電気代", "自家消費", "卒FIT", "売電", "節電", "余剰"],
+  "初期費用": ["初期費用", "費用", "価格", "コスト", "安価", "予算", "エントリー", "手頃", "抑え"],
+  "保証・安心": ["保証", "補償", "安心", "長期", "信頼"],
+  "設置スペース": ["設置スペース", "省スペース", "狭小", "屋内", "コンパクト", "密集", "狭い"]
+};
+
+// 製品の「向いている家庭」等の文章から重視カテゴリを推定する
+function detectPracticeCategory(p) {
+  const primary = isUnknownValue(p.suitableFamily) ? "" : String(p.suitableFamily);
+  const secondary = [p.merit, p.feature]
+    .filter((t) => !isUnknownValue(t))
+    .join(" ");
+
+  let best = null;
+  let bestScore = 0;
+  for (const [category, words] of Object.entries(PRACTICE_CATEGORY_KEYWORDS)) {
+    let score = 0;
+    words.forEach((w) => {
+      if (primary.includes(w)) score += 2;
+      if (secondary.includes(w)) score += 1;
+    });
+    if (score > bestScore) {
+      bestScore = score;
+      best = category;
+    }
+  }
+  return best; // どのカテゴリにも該当しない場合は null（実践問題の対象外）
+}
+
+// カテゴリごとの「お客様が重視していること」の言い換え（画面表示用）
+const PRACTICE_PRIORITY_LABEL = {
+  "停電対策": "停電・災害時の安心",
+  "電気代削減": "電気代の削減効果",
+  "初期費用": "初期費用を抑えること",
+  "EV/V2H": "EV・V2Hとの連携",
+  "保証・安心": "長期保証・故障時の安心",
+  "設置スペース": "設置場所の制約への対応"
+};
+
+// 実践提案問題の解説文を組み立てる（5つの要素を必ず含める）
+function buildPracticeExplanation(correctP, wrongPs, category) {
+  const parts = [];
+
+  // 1. なぜ正解か ＋ 2. 判断材料になったお客様条件
+  parts.push(
+    `正解は${correctP.maker}「${correctP.series}」です。` +
+    `お客様状況の「${stripOuterQuotes(correctP.suitableFamily)}」という条件が判断材料で、` +
+    `この製品はまさにそうした家庭に向いているとされています。`
+  );
+
+  // 3. 他の選択肢が弱い理由（各製品のデメリットを根拠にする）
+  const weakParts = wrongPs.map((wp) => {
+    if (!isUnknownValue(wp.demerit)) {
+      return `${wp.maker}「${wp.series}」は「${stripOuterQuotes(wp.demerit)}」という注意点があり、このお客様の最優先ニーズとはズレがあります`;
+    }
+    return `${wp.maker}「${wp.series}」は今回のお客様の重視ポイント（${PRACTICE_PRIORITY_LABEL[category] || category}）との合致度で一歩譲ります`;
+  });
+  parts.push(`一方、${weakParts.join("。")}。`);
+
+  // 4. 営業時にどう伝えるか
+  if (!isUnknownValue(correctP.salesPoint)) {
+    parts.push(`営業時には「${stripOuterQuotes(correctP.salesPoint)}」という伝え方が効果的です。`);
+  }
+
+  // 5. 注意すべきデメリット・確認事項
+  if (!isUnknownValue(correctP.demerit)) {
+    parts.push(`ただし「${stripOuterQuotes(correctP.demerit)}」という注意点があるため、提案時に正直に説明し、事前確認を怠らないようにしましょう。`);
+  }
+
+  return parts.join("");
+}
+
+/* ---- 4-1. 製品選択型（Aパターン）：お客様状況→最適な製品を選ぶ ---- */
+function genPracticeProductQuestions(products) {
+  const questions = [];
+
+  // 各製品の重視カテゴリを先に推定しておく
+  const withCat = products
+    .map((p) => ({ p, category: detectPracticeCategory(p) }))
+    .filter((x) => x.category !== null && !isUnknownValue(x.p.suitableFamily));
+
+  withCat.forEach(({ p, category }) => {
+    // ダミー選択肢＝重視カテゴリが異なる製品（正解が曖昧にならないように）
+    const others = withCat.filter((x) => x.p !== p && x.category !== category);
+    if (others.length < 3) return;
+
+    const wrongs = pickRandomN(others, 3).map((x) => x.p);
+    const choices = shuffleArray([makerLabel(p), ...wrongs.map(makerLabel)]);
+
+    questions.push({
+      id: nextQuestionId("p"),
+      mode: "practice",
+      category,
+      difficulty: "中級",
+      question: "次のお客様に最も提案しやすい蓄電池はどれ？",
+      customerScenario: {
+        "想定されるお客様": stripOuterQuotes(p.suitableFamily),
+        "重視していること": PRACTICE_PRIORITY_LABEL[category] || category
+      },
+      choices,
+      answer: makerLabel(p),
+      explanation: buildPracticeExplanation(p, wrongs, category),
+      sourceManufacturer: p.maker,
+      sourceProduct: p.series
+    });
+  });
+
+  return questions;
+}
+
+/* ---- 4-2. 営業トーク選択型（Bパターン）：お客様状況→響くトークを選ぶ ---- */
+function genPracticeTalkQuestions(products) {
+  const questions = [];
+
+  const withCat = products
+    .map((p) => ({ p, category: detectPracticeCategory(p) }))
+    .filter((x) =>
+      x.category !== null &&
+      !isUnknownValue(x.p.suitableFamily) &&
+      !isUnknownValue(x.p.salesPoint)
+    );
+
+  withCat.forEach(({ p, category }) => {
+    // ダミー＝カテゴリが異なる製品の訴求ポイント（トークとして的外れになるもの）
+    const others = withCat.filter(
+      (x) => x.p !== p && x.category !== category &&
+      stripOuterQuotes(x.p.salesPoint) !== stripOuterQuotes(p.salesPoint)
+    );
+    if (others.length < 3) return;
+
+    const wrongs = pickRandomN(others, 3).map((x) => x.p);
+    const correctTalk = stripOuterQuotes(p.salesPoint);
+    const choices = shuffleArray([correctTalk, ...wrongs.map((w) => stripOuterQuotes(w.salesPoint))]);
+
+    questions.push({
+      id: nextQuestionId("p"),
+      mode: "practice",
+      category: "営業トーク判断",
+      difficulty: "上級",
+      question: "次のお客様に最も響きやすい営業トーク（訴求ポイント）はどれ？",
+      customerScenario: {
+        "想定されるお客様": stripOuterQuotes(p.suitableFamily),
+        "重視していること": PRACTICE_PRIORITY_LABEL[category] || category
+      },
+      choices,
+      answer: correctTalk,
+      explanation: buildPracticeExplanation(p, wrongs, category),
+      sourceManufacturer: p.maker,
+      sourceProduct: p.series
+    });
+  });
+
+  return questions;
+}
+
+function generatePracticeQuestions(products) {
+  return genPracticeProductQuestions(products).concat(genPracticeTalkQuestions(products));
+}
+
+
+/* ================================================================
+   [パート5] 画面制御・クイズ進行ロジック（アプリ本体）
+   ================================================================ */
+
+// カテゴリの表示順（データに存在するものだけが実際に表示される）
+const CATEGORY_ORDER = [
+  "保証", "容量", "電池材料", "停電対策", "V2H", "太陽光連携",
+  "営業トーク", "メーカー比較", "メリット/デメリット",
+  "電気代削減", "初期費用", "EV/V2H", "保証・安心", "設置スペース", "営業トーク判断"
+];
+
+// アプリの状態（グローバル管理）
+const state = {
+  mode: null,        // "knowledge" | "practice" | "mix"
+  category: "全カテゴリ",
+  countOption: null, // "5" | "10" | "20" | "all"
+  sessionQuestions: [],
+  currentIndex: 0,
+  userAnswers: [],   // { question, chosenText, correct }
+  selectedChoice: null,
+  isReviewSession: false,
+  dataLoaded: false
+};
+
+let knowledgeQuestions = [];
+let practiceQuestions = [];
+let loadedProducts = [];
+
+// ---- 起動時の初期化 ----
+async function initApp() {
+  setupStartScreen();
+  showScreen("screen-start");
+  await loadAllData();
+}
+
+// スプレッドシートからデータを読み込み、問題を生成する
+async function loadAllData() {
+  const statusText = document.getElementById("data-status-text");
+  const reloadBtn = document.getElementById("btn-reload-data");
+
+  statusText.textContent = "スプレッドシートからデータを読み込み中…";
+  statusText.className = "status-loading";
+  reloadBtn.hidden = true;
+  state.dataLoaded = false;
+  validateStartButton();
+
+  try {
+    // SHEET_CONFIGの全シートを読み込む（現状は蓄電池シートのみ）
+    knowledgeQuestions = [];
+    practiceQuestions = [];
+    loadedProducts = [];
+    questionIdCounter = 1;
+
+    for (const conf of SHEET_CONFIG) {
+      const products = await loadProductsFromSheet(conf);
+      if (conf.type === "battery") {
+        loadedProducts = loadedProducts.concat(products);
+        knowledgeQuestions = knowledgeQuestions.concat(generateKnowledgeQuestions(products));
+        practiceQuestions = practiceQuestions.concat(generatePracticeQuestions(products));
+      }
+      // 将来の拡張：typeが増えたらここに分岐を追加する
+      // else if (conf.type === "subsidy") { ... 補助金シート用の生成関数 ... }
+    }
+
+    if (loadedProducts.length === 0) {
+      statusText.textContent =
+        "スプレッドシートにまだデータがありません。リサーチ結果をシートに貼り付けてから「再読み込み」を押してください。";
+      statusText.className = "status-warning";
+      reloadBtn.hidden = false;
+      return;
+    }
+
+    statusText.textContent =
+      `読み込み完了：${loadedProducts.length}製品 → 知識問題${knowledgeQuestions.length}問・実践提案問題${practiceQuestions.length}問を生成しました。`;
+    statusText.className = "status-ok";
+    reloadBtn.hidden = false;
+    state.dataLoaded = true;
+    validateStartButton();
+
+    // モード選択済みならカテゴリ一覧を更新する
+    if (state.mode) populateCategorySelect();
+  } catch (err) {
+    // file:// で開いた場合のCORSエラーもここに来る
+    const isFileProtocol = location.protocol === "file:";
+    statusText.textContent = isFileProtocol
+      ? "読み込みに失敗しました。file:// で直接開くとスプレッドシートを取得できません。ローカルサーバー経由（http://localhost/...）で開いてください（READMEの実行手順参照）。"
+      : `読み込みに失敗しました：${err.message}。共有設定（リンクを知っている全員が閲覧可）とネット接続を確認して「再読み込み」を押してください。`;
+    statusText.className = "status-error";
+    reloadBtn.hidden = false;
+  }
+}
+
+function setupStartScreen() {
+  const modeButtons = document.querySelectorAll("#mode-select .option-btn");
+  modeButtons.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      modeButtons.forEach((b) => b.classList.remove("selected"));
+      btn.classList.add("selected");
+      state.mode = btn.dataset.mode;
+      populateCategorySelect();
+      validateStartButton();
+    });
+  });
+
+  const countButtons = document.querySelectorAll("#count-select .option-btn");
+  countButtons.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      countButtons.forEach((b) => b.classList.remove("selected"));
+      btn.classList.add("selected");
+      state.countOption = btn.dataset.count;
+      validateStartButton();
+    });
+  });
+
+  document.getElementById("category-select").addEventListener("change", (e) => {
+    state.category = e.target.value;
+  });
+
+  document.getElementById("btn-start").addEventListener("click", beginQuizSession);
+  document.getElementById("btn-reload-data").addEventListener("click", loadAllData);
+  document.getElementById("btn-answer").addEventListener("click", submitAnswer);
+  document.getElementById("btn-next").addEventListener("click", goToNextQuestion);
+  document.getElementById("btn-restart").addEventListener("click", resetToStart);
+  document.getElementById("btn-review-wrong").addEventListener("click", startReviewSession);
+}
+
+// カテゴリ一覧は「実際に生成された問題」から動的に作る。
+// 将来スプレッドシートに新ジャンルのシートを追加しても、
+// 問題さえ生成されればカテゴリが自動的に選択肢に現れます。
+function populateCategorySelect() {
+  const select = document.getElementById("category-select");
+  select.innerHTML = "";
+
+  let pool;
+  if (state.mode === "knowledge") pool = knowledgeQuestions;
+  else if (state.mode === "practice") pool = practiceQuestions;
+  else pool = knowledgeQuestions.concat(practiceQuestions);
+
+  const present = new Set(pool.map((q) => q.category));
+  const ordered = CATEGORY_ORDER.filter((c) => present.has(c));
+  // 表示順リストにないカテゴリ（将来の新ジャンル）も末尾に追加する
+  present.forEach((c) => { if (!ordered.includes(c)) ordered.push(c); });
+
+  ["全カテゴリ", ...ordered].forEach((cat) => {
+    const opt = document.createElement("option");
+    opt.value = cat;
+    opt.textContent = cat;
+    select.appendChild(opt);
+  });
+  state.category = "全カテゴリ";
+}
+
+function validateStartButton() {
+  const btn = document.getElementById("btn-start");
+  btn.disabled = !(state.mode && state.countOption && state.dataLoaded);
+}
+
+// ---- 出題プールを組み立ててセッションを開始する ----
+function beginQuizSession() {
+  const pool = buildFilteredPool(state.mode, state.category);
+
+  if (pool.length === 0) {
+    document.getElementById("start-warning").textContent =
+      "選択した条件に合う問題がありません。カテゴリを変更してください。";
+    return;
+  }
+  document.getElementById("start-warning").textContent = "";
+
+  const n = state.countOption === "all" ? pool.length : Math.min(Number(state.countOption), pool.length);
+  state.sessionQuestions = pickSessionQuestions(pool, n, state.mode);
+  state.currentIndex = 0;
+  state.userAnswers = [];
+  state.isReviewSession = false;
+
+  showScreen("screen-quiz");
+  renderQuestion();
+}
+
+function buildFilteredPool(mode, category) {
+  let pool;
+  if (mode === "knowledge") pool = knowledgeQuestions;
+  else if (mode === "practice") pool = practiceQuestions;
+  else pool = knowledgeQuestions.concat(practiceQuestions);
+
+  if (category && category !== "全カテゴリ") {
+    pool = pool.filter((q) => q.category === category);
+  }
+  return pool;
+}
+
+// ミックスモードでは知識問題・実践提案問題が偏りすぎないように抽出する
+function pickSessionQuestions(pool, n, mode) {
+  let selected;
+
+  if (mode === "mix") {
+    const kPool = shuffleArray(pool.filter((q) => q.mode === "knowledge"));
+    const pPool = shuffleArray(pool.filter((q) => q.mode === "practice"));
+    const halfN = Math.ceil(n / 2);
+    let picked = kPool.slice(0, halfN).concat(pPool.slice(0, n - halfN));
+    if (picked.length < n) {
+      const remaining = shuffleArray(kPool.slice(halfN).concat(pPool.slice(n - halfN)));
+      picked = picked.concat(remaining.slice(0, n - picked.length));
+    }
+    selected = shuffleArray(picked).slice(0, n);
+  } else {
+    selected = shuffleArray(pool).slice(0, n);
+  }
+
+  return reduceConsecutiveMakerRepeats(selected);
+}
+
+// 同じメーカーが3問以上連続しないよう、簡易的に並び替える
+function reduceConsecutiveMakerRepeats(list) {
+  const arr = list.slice();
+  for (let i = 2; i < arr.length; i++) {
+    const m0 = arr[i - 2].sourceManufacturer;
+    const m1 = arr[i - 1].sourceManufacturer;
+    const m2 = arr[i].sourceManufacturer;
+    if (m0 && m0 === m1 && m1 === m2) {
+      for (let j = i + 1; j < arr.length; j++) {
+        if (arr[j].sourceManufacturer !== m2) {
+          [arr[i], arr[j]] = [arr[j], arr[i]];
+          break;
+        }
+      }
+    }
+  }
+  return arr;
+}
+
+// ---- クイズ画面の描画 ----
+function renderQuestion() {
+  const q = state.sessionQuestions[state.currentIndex];
+  state.selectedChoice = null;
+
+  document.getElementById("quiz-progress").textContent =
+    `問題 ${state.currentIndex + 1} / ${state.sessionQuestions.length}`;
+  document.getElementById("quiz-mode-badge").textContent =
+    q.mode === "knowledge" ? "知識問題" : "実践提案";
+  document.getElementById("quiz-category-badge").textContent = q.category;
+  document.getElementById("quiz-difficulty-badge").textContent = q.difficulty;
+
+  document.getElementById("question-text").textContent = q.question;
+
+  // 実践提案モードの場合はお客様状況カードを表示する
+  const customerCard = document.getElementById("customer-card");
+  if (q.mode === "practice" && q.customerScenario && typeof q.customerScenario === "object") {
+    customerCard.hidden = false;
+    renderCustomerCard(q.customerScenario);
+  } else {
+    customerCard.hidden = true;
+  }
+
+  renderChoices(q.choices);
+  document.getElementById("btn-answer").disabled = true;
+}
+
+// お客様状況カード：customerScenarioのキーと値をそのまま項目として表示する
+function renderCustomerCard(scenario) {
+  const list = document.getElementById("customer-card-list");
+  list.innerHTML = "";
+
+  Object.entries(scenario).forEach(([label, value]) => {
+    if (!value) return;
+    const li = document.createElement("li");
+    const b = document.createElement("b");
+    b.textContent = `${label}：`;
+    li.appendChild(b);
+    li.appendChild(document.createTextNode(value));
+    list.appendChild(li);
+  });
+}
+
+function renderChoices(choices) {
+  const container = document.getElementById("choices-list");
+  container.innerHTML = "";
+  const letters = ["A", "B", "C", "D"];
+
+  choices.forEach((choiceText, idx) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "choice-btn";
+
+    const letterSpan = document.createElement("span");
+    letterSpan.className = "choice-letter";
+    letterSpan.textContent = letters[idx] || "?";
+
+    const textSpan = document.createElement("span");
+    textSpan.textContent = choiceText;
+
+    btn.appendChild(letterSpan);
+    btn.appendChild(textSpan);
+
+    btn.addEventListener("click", () => {
+      container.querySelectorAll(".choice-btn").forEach((b) => b.classList.remove("selected"));
+      btn.classList.add("selected");
+      state.selectedChoice = choiceText;
+      document.getElementById("btn-answer").disabled = false;
+    });
+
+    container.appendChild(btn);
+  });
+}
+
+// ---- 回答を確定して解説画面へ ----
+function submitAnswer() {
+  const q = state.sessionQuestions[state.currentIndex];
+  const isCorrect = state.selectedChoice === q.answer;
+
+  state.userAnswers.push({
+    question: q,
+    chosenText: state.selectedChoice,
+    correct: isCorrect
+  });
+
+  renderExplainScreen(q, state.selectedChoice, isCorrect);
+  showScreen("screen-explain");
+}
+
+function renderExplainScreen(q, chosenText, isCorrect) {
+  const banner = document.getElementById("result-banner");
+  banner.textContent = isCorrect ? "正解！" : "不正解";
+  banner.className = "result-banner " + (isCorrect ? "correct" : "incorrect");
+
+  document.getElementById("explain-correct-answer").textContent = q.answer;
+
+  const userAnswerRow = document.getElementById("explain-user-answer-row");
+  if (!isCorrect) {
+    userAnswerRow.hidden = false;
+    document.getElementById("explain-user-answer").textContent = chosenText;
+  } else {
+    userAnswerRow.hidden = true;
+  }
+
+  document.getElementById("explain-text").textContent = q.explanation;
+}
+
+// ---- 次の問題へ進む／終了して結果画面へ ----
+function goToNextQuestion() {
+  state.currentIndex++;
+  if (state.currentIndex >= state.sessionQuestions.length) {
+    renderResultScreen();
+    showScreen("screen-result");
+  } else {
+    showScreen("screen-quiz");
+    renderQuestion();
+  }
+}
+
+// ---- 結果画面の描画 ----
+function renderResultScreen() {
+  const total = state.userAnswers.length;
+  const correctCount = state.userAnswers.filter((a) => a.correct).length;
+  const rate = total > 0 ? Math.round((correctCount / total) * 100) : 0;
+
+  document.getElementById("result-score").textContent = `${correctCount} / ${total}`;
+  document.getElementById("result-rate").textContent = `${rate}%`;
+
+  const knowledgeAnswers = state.userAnswers.filter((a) => a.question.mode === "knowledge");
+  const practiceAnswers = state.userAnswers.filter((a) => a.question.mode === "practice");
+
+  document.getElementById("result-knowledge-rate").textContent = formatRate(knowledgeAnswers);
+  document.getElementById("result-practice-rate").textContent = formatRate(practiceAnswers);
+
+  const wrongList = document.getElementById("wrong-list");
+  wrongList.innerHTML = "";
+  const wrongAnswers = state.userAnswers.filter((a) => !a.correct);
+
+  if (wrongAnswers.length === 0) {
+    document.getElementById("no-wrong-text").hidden = false;
+  } else {
+    document.getElementById("no-wrong-text").hidden = true;
+    wrongAnswers.forEach((a) => {
+      const li = document.createElement("li");
+      const modeTag = document.createElement("span");
+      modeTag.className = "wrong-q-mode";
+      modeTag.textContent = a.question.mode === "knowledge" ? "知識" : "実践提案";
+      li.appendChild(modeTag);
+      li.appendChild(document.createTextNode(a.question.question));
+      wrongList.appendChild(li);
+    });
+  }
+
+  document.getElementById("btn-review-wrong").disabled = wrongAnswers.length === 0;
+}
+
+function formatRate(answers) {
+  if (answers.length === 0) return "該当なし";
+  const correct = answers.filter((a) => a.correct).length;
+  const rate = Math.round((correct / answers.length) * 100);
+  return `${correct}/${answers.length}（${rate}%）`;
+}
+
+// ---- 間違えた問題だけ復習する ----
+function startReviewSession() {
+  const wrongQuestions = state.userAnswers.filter((a) => !a.correct).map((a) => a.question);
+  if (wrongQuestions.length === 0) return;
+
+  state.sessionQuestions = wrongQuestions;
+  state.currentIndex = 0;
+  state.userAnswers = [];
+  state.isReviewSession = true;
+
+  showScreen("screen-quiz");
+  renderQuestion();
+}
+
+// ---- 最初からやり直す ----
+function resetToStart() {
+  state.mode = null;
+  state.category = "全カテゴリ";
+  state.countOption = null;
+  state.sessionQuestions = [];
+  state.currentIndex = 0;
+  state.userAnswers = [];
+  state.isReviewSession = false;
+
+  document.querySelectorAll("#mode-select .option-btn, #count-select .option-btn").forEach((b) =>
+    b.classList.remove("selected")
+  );
+  document.getElementById("btn-start").disabled = true;
+  document.getElementById("start-warning").textContent = "";
+
+  showScreen("screen-start");
+}
+
+// ---- 画面切り替えの共通関数 ----
+function showScreen(id) {
+  document.querySelectorAll(".screen").forEach((el) => el.classList.remove("active"));
+  document.getElementById(id).classList.add("active");
+}
+
+// ---- アプリ起動 ----
+window.addEventListener("DOMContentLoaded", initApp);

@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>蓄電池メーカー比較クイズ｜営業判断力トレーニング</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="app">
+
+  <!-- ============================================================
+       画面1：スタート画面
+       出題モード・カテゴリ・問題数を選んでクイズを開始する
+  ============================================================= -->
+  <section id="screen-start" class="screen active">
+    <header class="app-header">
+      <h1>蓄電池メーカー比較クイズ</h1>
+      <p class="app-sub">知識を覚えて、営業現場での提案判断力を鍛えるトレーニングアプリ</p>
+    </header>
+
+    <!-- スプレッドシートの読み込み状況を表示するカード -->
+    <div class="card" id="data-status-card">
+      <h2 class="card-title">データ読み込み状況</h2>
+      <p id="data-status-text" class="status-loading">スプレッドシートからデータを読み込み中…</p>
+      <button type="button" id="btn-reload-data" class="btn-secondary btn-small" hidden>再読み込み</button>
+    </div>
+
+    <div class="card">
+      <h2 class="card-title">1. 出題モードを選ぶ</h2>
+      <div class="option-grid" id="mode-select">
+        <button type="button" class="option-btn" data-mode="knowledge">
+          <span class="opt-title">知識問題モード</span>
+          <span class="opt-desc">メーカー・製品スペックを覚える</span>
+        </button>
+        <button type="button" class="option-btn" data-mode="practice">
+          <span class="opt-title">実践提案モード</span>
+          <span class="opt-desc">お客様状況から最適提案を選ぶ</span>
+        </button>
+        <button type="button" class="option-btn" data-mode="mix">
+          <span class="opt-title">ミックスモード</span>
+          <span class="opt-desc">知識問題＋実践提案をランダム出題</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2 class="card-title">2. カテゴリを選ぶ</h2>
+      <select id="category-select" class="select-box"></select>
+    </div>
+
+    <div class="card">
+      <h2 class="card-title">3. 問題数を選ぶ</h2>
+      <div class="option-grid" id="count-select">
+        <button type="button" class="option-btn count-btn" data-count="5">5問</button>
+        <button type="button" class="option-btn count-btn" data-count="10">10問</button>
+        <button type="button" class="option-btn count-btn" data-count="20">20問</button>
+        <button type="button" class="option-btn count-btn" data-count="all">全問</button>
+      </div>
+    </div>
+
+    <p id="start-warning" class="warning-text"></p>
+
+    <button type="button" id="btn-start" class="btn-primary btn-large" disabled>クイズを始める</button>
+  </section>
+
+  <!-- ============================================================
+       画面2：クイズ画面
+  ============================================================= -->
+  <section id="screen-quiz" class="screen">
+    <div class="quiz-topbar">
+      <span id="quiz-progress" class="badge badge-progress"></span>
+      <span id="quiz-mode-badge" class="badge badge-mode"></span>
+      <span id="quiz-category-badge" class="badge badge-category"></span>
+      <span id="quiz-difficulty-badge" class="badge badge-difficulty"></span>
+    </div>
+
+    <!-- 実践提案モードのときだけ表示するお客様状況カード -->
+    <div id="customer-card" class="customer-card" hidden>
+      <h3>【お客様状況】</h3>
+      <ul id="customer-card-list"></ul>
+    </div>
+
+    <div class="card question-card">
+      <p id="question-text" class="question-text"></p>
+      <div id="choices-list" class="choices-list"></div>
+    </div>
+
+    <button type="button" id="btn-answer" class="btn-primary btn-large" disabled>回答する</button>
+  </section>
+
+  <!-- ============================================================
+       画面3：解説画面
+  ============================================================= -->
+  <section id="screen-explain" class="screen">
+    <div id="result-banner" class="result-banner"></div>
+
+    <div class="card">
+      <p class="explain-row"><span class="explain-label">正しい答え：</span><span id="explain-correct-answer"></span></p>
+      <p id="explain-user-answer-row" class="explain-row" hidden><span class="explain-label">あなたの回答：</span><span id="explain-user-answer"></span></p>
+    </div>
+
+    <div class="card">
+      <h3 class="card-title">解説</h3>
+      <p id="explain-text" class="explain-text"></p>
+    </div>
+
+    <button type="button" id="btn-next" class="btn-primary btn-large">次の問題へ</button>
+  </section>
+
+  <!-- ============================================================
+       画面4：結果画面
+  ============================================================= -->
+  <section id="screen-result" class="screen">
+    <h2 class="result-heading">結果発表</h2>
+
+    <div class="card result-summary">
+      <div class="result-stat">
+        <span class="result-stat-value" id="result-score"></span>
+        <span class="result-stat-label">正答数</span>
+      </div>
+      <div class="result-stat">
+        <span class="result-stat-value" id="result-rate"></span>
+        <span class="result-stat-label">正答率</span>
+      </div>
+    </div>
+
+    <div class="card result-breakdown" id="result-breakdown">
+      <div class="result-sub-stat">
+        <span class="result-sub-label">知識問題の正答率</span>
+        <span class="result-sub-value" id="result-knowledge-rate"></span>
+      </div>
+      <div class="result-sub-stat">
+        <span class="result-sub-label">実践提案問題の正答率</span>
+        <span class="result-sub-value" id="result-practice-rate"></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3 class="card-title">間違えた問題一覧</h3>
+      <ul id="wrong-list" class="wrong-list"></ul>
+      <p id="no-wrong-text" class="muted-text" hidden>全問正解でした！</p>
+    </div>
+
+    <button type="button" id="btn-review-wrong" class="btn-secondary btn-large">間違えた問題だけ復習する</button>
+    <button type="button" id="btn-restart" class="btn-primary btn-large">最初からやり直す</button>
+  </section>
+
+</div>
+
+<script src="script.js"></script>
+</body>
+</html>
