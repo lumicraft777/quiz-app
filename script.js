@@ -215,6 +215,10 @@ function isUnknownValue(value) {
   if (s === "不明" || s === "未確認" || s === "－" || s === "-") return true;
   if (s.startsWith("不明")) return true;
   if (s.includes("公式未確認")) return true;
+  // 「主な特徴」「メリット」「営業時の訴求ポイント」等のセルに、
+  // 本来の文章の代わりに参照用のURLだけが誤って入力されているケースがある。
+  // そのまま出題・解説に出すと意味不明な選択肢になるため「不明」扱いにする。
+  if (/^https?:\/\/\S+$/i.test(s)) return true;
   return false;
 }
 
