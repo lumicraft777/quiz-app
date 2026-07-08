@@ -215,6 +215,10 @@ function isUnknownValue(value) {
   if (s === "不明" || s === "未確認" || s === "－" || s === "-") return true;
   if (s.startsWith("不明")) return true;
   if (s.includes("公式未確認")) return true;
+  // 「判断保留」は本来ランキング等の判断を保留する際の記法だが、
+  // 通常の項目セルに誤って入力されると調査メモがそのまま出題・解説に
+  // 出てしまうため、こちらも「不明」と同様に扱う
+  if (s.startsWith("判断保留")) return true;
   // 「主な特徴」「メリット」「営業時の訴求ポイント」等のセルに、
   // 本来の文章の代わりに参照用のURLだけが誤って入力されているケースがある。
   // そのまま出題・解説に出すと意味不明な選択肢になるため「不明」扱いにする。
@@ -604,8 +608,53 @@ const PRACTICE_PRIORITY_LABEL = {
   "設置スペース": "設置場所の制約への対応"
 };
 
-// 実践提案問題の解説文を組み立てる（5つの要素を必ず含める）
-function buildPracticeExplanation(correctP, wrongPs, category) {
+/* ----------------------------------------------------------------
+   カテゴリごとの「客観的な失格条件」定義。
+   ----------------------------------------------------------------
+   以前は「重視カテゴリが違う製品」というだけでダミー選択肢を選んでいたが、
+   これだと「人によっては他の選択肢も妥当では？」と解釈が割れやすいという
+   指摘を受けた（営業現場での実機テストより）。
+   そこで、各カテゴリについて実データ（構造化された列の値）だけで
+   白黒つけられる「お客様の必須条件」を定義し、それに明確に矛盾する製品
+   だけを「失格」として扱うようにした。
+   ここに定義がないカテゴリ（例：初期費用＝価格データが無く客観的に
+   判定できない）は、消去法問題を生成しない。
+------------------------------------------------------------- */
+// ※ reason()はすべて「〜ため、」に自然につながる中止形（プレーン形）で
+//   統一している。文末（「〜です/ません」）にすると呼び出し側で
+//   「ではありませんため」のような不自然な二重表現になるため。
+const PRACTICE_DISQUALIFIER_RULES = {
+  "停電対策": {
+    requirement: "停電時に家全体（全負荷）の電気を使いたい",
+    isDisqualified: (p) =>
+      !isUnknownValue(p.loadType) && /特定負荷/.test(p.loadType) && !/全負荷/.test(p.loadType),
+    reason: (p) => `負荷タイプが「${p.loadType}」で全負荷に対応しておらず、停電時に家全体を使いたいというご要望に応えられない`
+  },
+  "EV/V2H": {
+    requirement: "EV・V2H連携が必須",
+    isDisqualified: (p) => !isPositiveValue(p.v2h),
+    reason: (p) => `V2H対応が公式データ上「${isUnknownValue(p.v2h) ? "不明" : p.v2h}」であり、V2H連携を確約して提案するのは適切でない`
+  },
+  "保証・安心": {
+    requirement: "自然災害補償を含む長期の安心を重視",
+    isDisqualified: (p) => !isPositiveValue(p.disasterCompensation),
+    reason: (p) => `自然災害補償が公式データ上「${isUnknownValue(p.disasterCompensation) ? "不明" : p.disasterCompensation}」であり、災害時の補償を安心材料として断定的に伝えるのは適切でない`
+  },
+  "設置スペース": {
+    requirement: "設置スペースが限られており屋内設置も検討したい",
+    isDisqualified: (p) => !isUnknownValue(p.installation) && String(p.installation).trim() === "屋外設置",
+    reason: (p) => `設置条件が「${p.installation}」で屋内設置ができず、設置スペースが限られるお客様には提案しづらい`
+  },
+  "電気代削減": {
+    requirement: "太陽光の自家消費拡大で電気代を削減したい",
+    isDisqualified: (p) => !isPositiveValue(p.solarLink),
+    reason: (p) => `太陽光連携が公式データ上「${isUnknownValue(p.solarLink) ? "不明" : p.solarLink}」であり、自家消費による電気代削減を訴求する根拠が弱い`
+  }
+  // "初期費用"：価格帯のデータが無く客観的に判定できないため、あえて定義しない
+};
+
+// 実践提案問題（製品選択型）の解説文を組み立てる（5つの要素を必ず含める）
+function buildPracticeExplanation(correctP, wrongPs, category, rule) {
   const parts = [];
 
   // 1. なぜ正解か ＋ 2. 判断材料になったお客様条件
@@ -615,8 +664,13 @@ function buildPracticeExplanation(correctP, wrongPs, category) {
     `この製品はまさにそうした家庭に向いているとされています。`
   );
 
-  // 3. 他の選択肢が弱い理由（各製品のデメリットを根拠にする）
+  // 3. 他の選択肢が弱い理由
+  // 客観的な失格条件（実データ上の矛盾）があればそれを優先して示し、
+  // なければデメリット、それも無ければ重視ポイントとの合致度で説明する
   const weakParts = wrongPs.map((wp) => {
+    if (rule && rule.isDisqualified(wp)) {
+      return `${wp.maker}「${wp.series}」は${rule.reason(wp)}ため、この条件のお客様には明確に不向きです`;
+    }
     if (!isUnknownValue(wp.demerit)) {
       return `${wp.maker}「${wp.series}」は「${stripOuterQuotes(wp.demerit)}」という注意点があり、このお客様の最優先ニーズとはズレがあります`;
     }
@@ -637,21 +691,34 @@ function buildPracticeExplanation(correctP, wrongPs, category) {
   return parts.join("");
 }
 
-/* ---- 4-1. 製品選択型（Aパターン）：お客様状況→最適な製品を選ぶ ---- */
+/* ---- 4-1. 製品選択型（Aパターン）：お客様状況→最適な製品を選ぶ ----
+   誤答（ダミー選択肢）は、客観的な失格条件（PRACTICE_DISQUALIFIER_RULES）を
+   満たす製品を優先的に採用する。定義済みカテゴリでは「なぜ他の選択肢が
+   不適切か」を実データの数値・文言で裏付けられるようになる。
+   ルールが無い／失格候補が足りないカテゴリは、従来通り「重視カテゴリが
+   違う製品」を補完的に使う（出題数を大きく減らさないため）。
+------------------------------------------------------------- */
 function genPracticeProductQuestions(products) {
   const questions = [];
 
-  // 各製品の重視カテゴリを先に推定しておく
   const withCat = products
     .map((p) => ({ p, category: detectPracticeCategory(p) }))
     .filter((x) => x.category !== null && !isUnknownValue(x.p.suitableFamily));
 
   withCat.forEach(({ p, category }) => {
-    // ダミー選択肢＝重視カテゴリが異なる製品（正解が曖昧にならないように）
-    const others = withCat.filter((x) => x.p !== p && x.category !== category);
-    if (others.length < 3) return;
+    const rule = PRACTICE_DISQUALIFIER_RULES[category];
+    const others = withCat.filter((x) => x.p !== p);
 
-    const wrongs = pickRandomN(others, 3).map((x) => x.p);
+    const disqualifiedPool = rule ? others.filter((x) => rule.isDisqualified(x.p)) : [];
+    const fallbackPool = others.filter((x) => x.category !== category && !disqualifiedPool.includes(x));
+
+    let wrongs = pickRandomN(disqualifiedPool, Math.min(3, disqualifiedPool.length)).map((x) => x.p);
+    if (wrongs.length < 3) {
+      const filler = pickRandomN(fallbackPool, 3 - wrongs.length).map((x) => x.p);
+      wrongs = wrongs.concat(filler);
+    }
+    if (wrongs.length < 3) return;
+
     const choices = shuffleArray([makerLabel(p), ...wrongs.map(makerLabel)]);
 
     questions.push({
@@ -666,7 +733,7 @@ function genPracticeProductQuestions(products) {
       },
       choices,
       answer: makerLabel(p),
-      explanation: buildPracticeExplanation(p, wrongs, category),
+      explanation: buildPracticeExplanation(p, wrongs, category, rule),
       sourceManufacturer: p.maker,
       sourceProduct: p.series
     });
@@ -675,49 +742,87 @@ function genPracticeProductQuestions(products) {
   return questions;
 }
 
-/* ---- 4-2. 営業トーク選択型（Bパターン）：お客様状況→響くトークを選ぶ ---- */
+/* ---- 4-2. 営業トーク消去法（旧Bパターンを刷新）----
+   「最も響くトークを選ぶ」形式は、複数の訴求ポイントが同時に妥当に見え、
+   人によって解釈が割れやすいという指摘が最も多かった設問タイプ。
+   そこで「明らかに不適切な提案を1つ選ぶ」消去法形式に変更した。
+   正解（＝消去すべき1つ）は、客観的な失格条件（実データ上の矛盾）が
+   確認できる製品に限定する。失格条件を定義できる／該当製品があるときだけ
+   出題するため、「なぜこれが不正解か」を必ず実データで説明できる。
+------------------------------------------------------------- */
 function genPracticeTalkQuestions(products) {
   const questions = [];
 
   const withCat = products
     .map((p) => ({ p, category: detectPracticeCategory(p) }))
-    .filter((x) =>
-      x.category !== null &&
-      !isUnknownValue(x.p.suitableFamily) &&
-      !isUnknownValue(x.p.salesPoint)
-    );
+    .filter((x) => x.category !== null && !isUnknownValue(x.p.salesPoint));
 
-  withCat.forEach(({ p, category }) => {
-    // ダミー＝カテゴリが異なる製品の訴求ポイント（トークとして的外れになるもの）
-    const others = withCat.filter(
-      (x) => x.p !== p && x.category !== category &&
-      stripOuterQuotes(x.p.salesPoint) !== stripOuterQuotes(p.salesPoint)
-    );
-    if (others.length < 3) return;
+  withCat.forEach(({ p: baseP, category }) => {
+    const rule = PRACTICE_DISQUALIFIER_RULES[category];
+    if (!rule) return; // 客観的な失格条件を定義できないカテゴリは出題しない
 
-    const wrongs = pickRandomN(others, 3).map((x) => x.p);
-    const correctTalk = stripOuterQuotes(p.salesPoint);
-    const choices = shuffleArray([correctTalk, ...wrongs.map((w) => stripOuterQuotes(w.salesPoint))]);
+    // 実データ上、明確にお客様の必須条件と矛盾する製品（＝消去すべき選択肢）を探す
+    const disqualified = withCat.filter((x) => x.p !== baseP && rule.isDisqualified(x.p));
+    if (disqualified.length === 0) return;
+    const badPick = disqualified[Math.floor(Math.random() * disqualified.length)].p;
+
+    // 「明確な矛盾が無い」選択肢（消去法なので、ベストである必要はない）
+    const safeCandidates = withCat.filter(
+      (x) => x.p !== baseP && x.p !== badPick && !rule.isDisqualified(x.p)
+    );
+    if (safeCandidates.length < 2) return;
+    const safePicks = pickRandomN(safeCandidates, 2).map((x) => x.p);
+
+    const choiceProducts = shuffleArray([baseP, ...safePicks, badPick]);
+    const choices = choiceProducts.map((cp) => stripOuterQuotes(cp.salesPoint));
+    if (new Set(choices).size < 4) return; // 訴求ポイントの文言が重複する場合は出題しない
 
     questions.push({
       id: nextQuestionId("p"),
       mode: "practice",
       category: "営業トーク判断",
       difficulty: "上級",
-      question: "次のお客様に最も響きやすい営業トーク（訴求ポイント）はどれ？",
+      question: "次のうち、このお客様への提案として明らかに不適切なものはどれ？",
       customerScenario: {
-        "想定されるお客様": stripOuterQuotes(p.suitableFamily),
-        "重視していること": PRACTICE_PRIORITY_LABEL[category] || category
+        "想定されるお客様": stripOuterQuotes(baseP.suitableFamily) || rule.requirement,
+        "必須条件": rule.requirement
       },
       choices,
-      answer: correctTalk,
-      explanation: buildPracticeExplanation(p, wrongs, category),
-      sourceManufacturer: p.maker,
-      sourceProduct: p.series
+      answer: stripOuterQuotes(badPick.salesPoint),
+      explanation: buildTalkEliminationExplanation(badPick, rule),
+      sourceManufacturer: badPick.maker,
+      sourceProduct: badPick.series
     });
   });
 
   return questions;
+}
+
+// 営業トーク消去法問題の解説文（不適切と判断できる根拠を実データで示す）
+function buildTalkEliminationExplanation(badP, rule) {
+  const parts = [];
+
+  parts.push(
+    `不適切なのは${badP.maker}「${badP.series}」の訴求ポイントです。` +
+    `このお客様は「${rule.requirement}」ことを必須条件としていますが、` +
+    `${badP.maker}「${badP.series}」は${rule.reason(badP)}。`
+  );
+
+  parts.push(
+    "他の3つの選択肢は、いずれも公式データ上この必須条件と明確に矛盾する情報がないため、状況に応じて提案しうる訴求ポイントです。"
+  );
+
+  if (!isUnknownValue(badP.merit)) {
+    parts.push(
+      `なお${badP.maker}「${badP.series}」自体は「${stripOuterQuotes(badP.merit)}」という別の強みを持つ製品なので、条件が異なるお客様には十分な選択肢になり得ます。`
+    );
+  }
+
+  parts.push(
+    "営業時には、訴求ポイントの魅力だけで即決せず、必ず対象製品の仕様がお客様の必須条件を満たすかを確認してから伝えることが重要です。"
+  );
+
+  return parts.join("");
 }
 
 function generatePracticeQuestions(products) {
