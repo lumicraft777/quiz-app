@@ -7,7 +7,7 @@
 <!-- style.css / script.js を編集したら ?v= の数字を必ず増やすこと。
      増やさないと、ブラウザにキャッシュされた古いファイルが
      読み込まれ続け、コード修正がユーザーの端末に反映されないため。 -->
-<link rel="stylesheet" href="style.css?v=4">
+<link rel="stylesheet" href="style.css?v=5">
 </head>
 <body>
 
@@ -20,21 +20,39 @@
 <div id="app">
 
   <!-- ============================================================
+       画面0：ユーザー入力画面
+       自己ベスト・連続正解数・不正解リストはユーザーごとにlocalStorageで
+       記録するため、最初にユーザー名を確定させる
+  ============================================================= -->
+  <section id="screen-user" class="screen active">
+    <header class="app-header">
+      <h1>蓄電池メーカー比較クイズ</h1>
+      <p class="app-sub">知識を覚えて、営業現場での提案判断力を鍛えるトレーニングアプリ</p>
+    </header>
+
+    <div class="card">
+      <h2 class="card-title">ユーザー名を入力してください</h2>
+      <p class="user-desc">自己ベスト・連続正解数・間違えた問題は、ユーザーごとに分けて記録されます。他の人の記録は表示されません。</p>
+      <input type="text" id="username-input" class="select-box" placeholder="例：山田" maxlength="20" autocomplete="off">
+      <p id="username-warning" class="warning-text"></p>
+      <button type="button" id="btn-user-start" class="btn-primary btn-large">このユーザーで開始</button>
+    </div>
+  </section>
+
+  <!-- ============================================================
        画面1：スタート画面
        出題モード・カテゴリ・問題数を選んでクイズを開始する
   ============================================================= -->
-  <section id="screen-start" class="screen active">
+  <section id="screen-start" class="screen">
     <header class="app-header">
       <h1>蓄電池メーカー比較クイズ</h1>
       <p class="app-sub">知識を覚えて、営業現場での提案判断力を鍛えるトレーニングアプリ</p>
       <p id="best-record-text" class="best-record-text"></p>
     </header>
 
-    <!-- スプレッドシートの読み込み状況を表示するカード -->
-    <div class="card" id="data-status-card">
-      <h2 class="card-title">データ読み込み状況</h2>
-      <p id="data-status-text" class="status-loading">スプレッドシートからデータを読み込み中…</p>
-      <button type="button" id="btn-reload-data" class="btn-secondary btn-small" hidden>再読み込み</button>
+    <div class="user-bar">
+      <span id="current-user-label" class="current-user-label"></span>
+      <button type="button" id="btn-switch-user" class="link-btn">ユーザーを切り替える</button>
     </div>
 
     <div class="card">
@@ -73,6 +91,13 @@
     <p id="start-warning" class="warning-text"></p>
 
     <button type="button" id="btn-start" class="btn-primary btn-large" disabled>クイズを始める</button>
+
+    <!-- スプレッドシートの読み込み状況（控えめな小さいカードで表示） -->
+    <div class="data-status-card" id="data-status-card">
+      <p id="data-status-text" class="status-loading">スプレッドシートからデータを読み込み中…</p>
+      <ul id="data-status-detail" class="data-status-detail" hidden></ul>
+      <button type="button" id="btn-reload-data" class="link-btn" hidden>再読み込み</button>
+    </div>
   </section>
 
   <!-- ============================================================
@@ -106,18 +131,25 @@
 
   <!-- ============================================================
        画面3：解説画面
+       正誤の全体サマリーに加え、4つの選択肢すべてについて
+       「正解/不正解」「理由」「営業判断のポイント」を比較表示する
   ============================================================= -->
   <section id="screen-explain" class="screen">
     <div id="result-banner" class="result-banner"></div>
 
     <div class="card">
+      <p class="explain-row"><span class="explain-label">あなたの回答：</span><span id="explain-user-answer"></span></p>
       <p class="explain-row"><span class="explain-label">正しい答え：</span><span id="explain-correct-answer"></span></p>
-      <p id="explain-user-answer-row" class="explain-row" hidden><span class="explain-label">あなたの回答：</span><span id="explain-user-answer"></span></p>
     </div>
 
     <div class="card">
-      <h3 class="card-title">解説</h3>
+      <h3 class="card-title">全体の解説</h3>
       <p id="explain-text" class="explain-text"></p>
+    </div>
+
+    <div class="card">
+      <h3 class="card-title">選択肢ごとの比較</h3>
+      <div id="choice-breakdown-list" class="choice-breakdown-list"></div>
     </div>
 
     <button type="button" id="btn-next" class="btn-primary btn-large">次の問題へ</button>
@@ -125,6 +157,8 @@
 
   <!-- ============================================================
        画面4：結果画面
+       ここに表示される成績はすべて「現在ログイン中のユーザー」のみ。
+       他のユーザーの記録は一切参照・表示しない。
   ============================================================= -->
   <section id="screen-result" class="screen">
     <h2 class="result-heading">結果発表</h2>
@@ -134,15 +168,13 @@
     <div class="card result-summary">
       <div class="result-stat">
         <span class="result-stat-value" id="result-score"></span>
-        <span class="result-stat-label">正答数</span>
+        <span class="result-stat-label">今回の正答数</span>
       </div>
       <div class="result-stat">
         <span class="result-stat-value" id="result-rate"></span>
-        <span class="result-stat-label">正答率</span>
+        <span class="result-stat-label">今回の正答率</span>
       </div>
     </div>
-
-    <p id="streak-summary" class="streak-summary"></p>
 
     <div class="card result-breakdown" id="result-breakdown">
       <div class="result-sub-stat">
@@ -156,17 +188,55 @@
     </div>
 
     <div class="card">
-      <h3 class="card-title">間違えた問題一覧</h3>
+      <h3 class="card-title">あなたの記録</h3>
+      <div class="record-grid">
+        <div class="record-item">
+          <span class="record-label">現在の連続正解</span>
+          <span class="record-value" id="result-current-streak"></span>
+        </div>
+        <div class="record-item">
+          <span class="record-label">過去最高連続正解</span>
+          <span class="record-value" id="result-best-streak"></span>
+        </div>
+        <div class="record-item">
+          <span class="record-label">自己ベスト正答数</span>
+          <span class="record-value" id="result-best-score"></span>
+        </div>
+        <div class="record-item">
+          <span class="record-label">自己ベスト正答率</span>
+          <span class="record-value" id="result-best-rate"></span>
+        </div>
+        <div class="record-item">
+          <span class="record-label">累計回答数</span>
+          <span class="record-value" id="result-total-answered"></span>
+        </div>
+        <div class="record-item">
+          <span class="record-label">累計正解数</span>
+          <span class="record-value" id="result-total-correct"></span>
+        </div>
+        <div class="record-item">
+          <span class="record-label">累計正答率</span>
+          <span class="record-value" id="result-total-rate"></span>
+        </div>
+        <div class="record-item">
+          <span class="record-label">不正解リスト数</span>
+          <span class="record-value" id="result-wrong-count"></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3 class="card-title">間違えた問題一覧（今回分）</h3>
       <ul id="wrong-list" class="wrong-list"></ul>
       <p id="no-wrong-text" class="muted-text" hidden>全問正解でした！</p>
     </div>
 
-    <button type="button" id="btn-review-wrong" class="btn-secondary btn-large">間違えた問題だけ復習する</button>
+    <button type="button" id="btn-review-wrong" class="btn-secondary btn-large">不正解問題を復習する</button>
     <button type="button" id="btn-restart" class="btn-primary btn-large">最初からやり直す</button>
   </section>
 
 </div>
 
-<script src="script.js?v=8"></script>
+<script src="script.js?v=9"></script>
 </body>
 </html>

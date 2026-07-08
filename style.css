@@ -207,17 +207,66 @@ body {
 }
 
 /* ============================================================
-   データ読み込み状況の表示
+   ユーザー入力画面／ユーザー切り替えバー
    ============================================================= */
-#data-status-card p {
-  margin: 0 0 10px;
-  font-size: 0.9rem;
+.user-desc {
+  margin: 0 0 12px;
+  font-size: 0.85rem;
+  color: var(--color-muted);
+  text-align: left;
+}
+#username-input {
+  margin-bottom: 8px;
+}
+.user-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 4px 12px;
+  font-size: 0.85rem;
+}
+.current-user-label {
+  color: var(--color-primary-dark);
+  font-weight: bold;
+}
+.link-btn {
+  background: none;
+  border: none;
+  color: var(--color-primary);
+  text-decoration: underline;
+  font-size: 0.85rem;
+  cursor: pointer;
+  padding: 4px;
+}
+
+/* ============================================================
+   データ読み込み状況の表示（クイズ開始ボタンの下に、控えめに表示）
+   ============================================================= */
+.data-status-card {
+  margin-top: 18px;
+  padding: 10px 4px 0;
+  text-align: center;
+}
+.data-status-card p {
+  margin: 0 0 6px;
+  font-size: 0.78rem;
   line-height: 1.5;
 }
 .status-loading { color: var(--color-muted); }
-.status-ok { color: var(--color-correct); font-weight: bold; }
+.status-ok { color: var(--color-muted); font-weight: normal; }
 .status-warning { color: #b4571b; font-weight: bold; }
 .status-error { color: var(--color-incorrect); font-weight: bold; }
+
+.data-status-detail {
+  list-style: none;
+  margin: 0 0 6px;
+  padding: 0;
+  font-size: 0.76rem;
+  color: var(--color-muted);
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+}
 
 .btn-small {
   padding: 10px;
@@ -458,6 +507,92 @@ body {
 }
 
 /* ============================================================
+   選択肢ごとの比較（解説画面）
+   ============================================================= */
+.choice-breakdown-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.choice-breakdown-item {
+  border: 2px solid var(--color-border);
+  border-left-width: 5px;
+  border-radius: 10px;
+  padding: 12px 14px;
+  background: #fafcfb;
+}
+.choice-breakdown-item.is-correct {
+  border-left-color: var(--color-correct);
+  background: #f2faf3;
+}
+.choice-breakdown-item.is-incorrect {
+  border-left-color: var(--color-border);
+}
+.choice-breakdown-item.is-incorrect.is-user-choice {
+  border-left-color: var(--color-incorrect);
+  background: #fdf3f2;
+}
+.choice-breakdown-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+.choice-breakdown-letter {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--color-muted);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  font-size: 0.75rem;
+}
+.choice-breakdown-item.is-correct .choice-breakdown-letter {
+  background: var(--color-correct);
+}
+.choice-breakdown-item.is-incorrect.is-user-choice .choice-breakdown-letter {
+  background: var(--color-incorrect);
+}
+.choice-breakdown-text {
+  font-weight: bold;
+  font-size: 0.92rem;
+  flex: 1 1 auto;
+}
+.choice-breakdown-badge {
+  flex: none;
+  font-size: 0.72rem;
+  font-weight: bold;
+  padding: 3px 8px;
+  border-radius: 999px;
+}
+.badge-correct {
+  background: #e6f6ea;
+  color: var(--color-correct);
+}
+.badge-incorrect {
+  background: #f1f1f1;
+  color: var(--color-muted);
+}
+.choice-breakdown-item.is-incorrect.is-user-choice .badge-incorrect {
+  background: #fdeceb;
+  color: var(--color-incorrect);
+}
+.choice-breakdown-reason,
+.choice-breakdown-salespoint {
+  margin: 4px 0 0;
+  font-size: 0.87rem;
+  line-height: 1.55;
+}
+.choice-breakdown-salespoint {
+  color: var(--color-muted);
+}
+
+/* ============================================================
    結果画面
    ============================================================= */
 .result-heading {
@@ -480,12 +615,6 @@ body {
   border-radius: 12px;
   margin: 0 0 12px;
   animation: correct-pop 0.5s ease;
-}
-.streak-summary {
-  text-align: center;
-  color: var(--color-muted);
-  font-size: 0.85rem;
-  margin: -4px 0 16px;
 }
 .result-summary {
   display: flex;
@@ -523,6 +652,27 @@ body {
   color: var(--color-muted);
   font-size: 0.82rem;
 }
+
+/* あなたの記録（自己ベスト・連続正解・累計）：ユーザーごとの成績のみ表示 */
+.record-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 16px;
+}
+.record-item {
+  display: flex;
+  flex-direction: column;
+}
+.record-label {
+  font-size: 0.78rem;
+  color: var(--color-muted);
+}
+.record-value {
+  font-size: 1.15rem;
+  font-weight: bold;
+  color: var(--color-primary-dark);
+}
+
 .wrong-list {
   list-style: none;
   margin: 0;
