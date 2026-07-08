@@ -396,11 +396,14 @@ function genReverseQuestions(products, field, questionPrefix, category, difficul
     };
     distractors.forEach((d) => {
       const ownText = !isUnknownValue(d.product[field]) ? stripOuterQuotes(d.product[field]) : null;
+      // d.labelはメーカー名のみの場合があるため、解説では必ず具体的な製品名まで
+      // 明記する（「どの製品と比較して不正解なのか」を常に追える状態にする）
+      const specificName = `${d.product.maker}「${d.product.series}」`;
       choiceExplanations[d.label] = {
         result: "不正解",
         reason: ownText
-          ? `${d.label}自体の該当項目は「${ownText}」であり、今回の文章とは異なります。今回の文章が指しているのは${p.maker}「${p.series}」です。`
-          : `${d.label}にはこの文章に該当する記載がなく、今回の文章が指しているのは${p.maker}「${p.series}」です。`
+          ? `${specificName}自体の該当項目は「${ownText}」であり、今回の文章とは異なります。今回の文章が指しているのは${p.maker}「${p.series}」です。`
+          : `${specificName}にはこの文章に該当する記載がなく、今回の文章が指しているのは${p.maker}「${p.series}」です。`
       };
     });
 
@@ -564,18 +567,23 @@ function generateKnowledgeQuestions(products) {
   qs = qs.concat(genFieldQuestions(products, "v2h",
     (p) => `${p.maker}「${p.series}」のV2H対応状況として正しいものはどれ？`, "V2H", "中級"));
 
+  // answerTypeは全て"product"（メーカー＋製品名）に統一している。
+  // 以前は"maker"（メーカー名のみ）を使っていたが、同じメーカーが複数製品を
+  // 持つ場合に「どの製品と比較して不正解なのか」が選択肢からは分からず、
+  // 選択肢ごとの解説を読んでも紐づけにくいという指摘を受けたため。
+  // 質問文もそもそも「製品はどれ？」と聞いているので、製品単位の方が一致する。
   qs = qs.concat(genReverseQuestions(products, "suitableFamily",
     "次のような家庭に向いている製品はどれ？", "メリット/デメリット", "中級", "product"));
   qs = qs.concat(genReverseQuestions(products, "merit",
-    "次のメリットが特徴とされている製品はどれ？", "メリット/デメリット", "中級", "maker"));
+    "次のメリットが特徴とされている製品はどれ？", "メリット/デメリット", "中級", "product"));
   qs = qs.concat(genReverseQuestions(products, "salesPoint",
-    "次の営業トークが訴求ポイントとして合う製品はどれ？", "営業トーク", "中級", "maker"));
+    "次の営業トークが訴求ポイントとして合う製品はどれ？", "営業トーク", "中級", "product"));
   qs = qs.concat(genReverseQuestions(products, "feature",
-    "次の特徴を持つ製品はどれ？", "メーカー比較", "中級", "maker"));
+    "次の特徴を持つ製品はどれ？", "メーカー比較", "中級", "product"));
 
   // ===== 上級：デメリット・複数メーカー比較 =====
   qs = qs.concat(genReverseQuestions(products, "demerit",
-    "次のデメリット（注意点）が指摘されている製品はどれ？", "メリット/デメリット", "上級", "maker"));
+    "次のデメリット（注意点）が指摘されている製品はどれ？", "メリット/デメリット", "上級", "product"));
 
   qs = qs.concat(genBooleanQuestions(products, "v2h", {
     positive: "V2H（電気自動車との連携）に対応しているのはどれ？",
@@ -1655,7 +1663,7 @@ function renderQuestion() {
   const customerCard = document.getElementById("customer-card");
   if (q.mode === "practice" && q.customerScenario && typeof q.customerScenario === "object") {
     customerCard.hidden = false;
-    renderCustomerCard(q.customerScenario);
+    renderCustomerCard(q.customerScenario, "customer-card-list");
   } else {
     customerCard.hidden = true;
   }
@@ -1664,9 +1672,10 @@ function renderQuestion() {
   document.getElementById("btn-answer").disabled = true;
 }
 
-// お客様状況カード：customerScenarioのキーと値をそのまま項目として表示する
-function renderCustomerCard(scenario) {
-  const list = document.getElementById("customer-card-list");
+// お客様状況カード：customerScenarioのキーと値をそのまま項目として表示する。
+// クイズ画面・解説画面の両方から使うため、表示先のリストIDを引数で受け取る。
+function renderCustomerCard(scenario, listId) {
+  const list = document.getElementById(listId);
   list.innerHTML = "";
 
   Object.entries(scenario).forEach(([label, value]) => {
@@ -1778,6 +1787,16 @@ function renderExplainScreen(q, chosenText, isCorrect) {
   const banner = document.getElementById("result-banner");
   banner.textContent = isCorrect ? "正解！" : "不正解";
   banner.className = "result-banner " + (isCorrect ? "correct" : "incorrect");
+
+  // クイズ画面から離れても分かるよう、問題文（＋実践提案モードならお客様状況）を再掲する
+  document.getElementById("explain-question-text").textContent = q.question;
+  const explainCustomerCard = document.getElementById("explain-customer-card");
+  if (q.mode === "practice" && q.customerScenario && typeof q.customerScenario === "object") {
+    explainCustomerCard.hidden = false;
+    renderCustomerCard(q.customerScenario, "explain-customer-card-list");
+  } else {
+    explainCustomerCard.hidden = true;
+  }
 
   document.getElementById("explain-user-answer").textContent = chosenText;
   document.getElementById("explain-correct-answer").textContent = q.answer;

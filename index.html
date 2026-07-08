@@ -7,7 +7,7 @@
 <!-- style.css / script.js を編集したら ?v= の数字を必ず増やすこと。
      増やさないと、ブラウザにキャッシュされた古いファイルが
      読み込まれ続け、コード修正がユーザーの端末に反映されないため。 -->
-<link rel="stylesheet" href="style.css?v=5">
+<link rel="stylesheet" href="style.css?v=6">
 </head>
 <body>
 
@@ -137,6 +137,18 @@
   <section id="screen-explain" class="screen">
     <div id="result-banner" class="result-banner"></div>
 
+    <!-- クイズ画面から離れても問題文を見返せるよう、ここにも再掲する -->
+    <div class="card">
+      <p class="explain-label">問題</p>
+      <p id="explain-question-text" class="question-text"></p>
+    </div>
+
+    <!-- 実践提案モードの場合のみ、お客様状況カードも再掲する -->
+    <div id="explain-customer-card" class="customer-card" hidden>
+      <h3>【お客様状況】</h3>
+      <ul id="explain-customer-card-list"></ul>
+    </div>
+
     <div class="card">
       <p class="explain-row"><span class="explain-label">あなたの回答：</span><span id="explain-user-answer"></span></p>
       <p class="explain-row"><span class="explain-label">正しい答え：</span><span id="explain-correct-answer"></span></p>
@@ -237,6 +249,6 @@
 
 </div>
 
-<script src="script.js?v=9"></script>
+<script src="script.js?v=11"></script>
 </body>
 </html>
