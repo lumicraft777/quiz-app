@@ -32,7 +32,8 @@ const {
   loadProductsFromSheet,
   resetQuestionIdCounter,
   generateKnowledgeQuestions,
-  generatePracticeQuestions
+  generatePracticeQuestions,
+  generateBasicConceptQuestions
 } = require("../question-generator.js");
 
 // ---- .env を読み込む（外部ライブラリは使わず、最低限の手書きパーサーで済ませる） ----
@@ -114,6 +115,11 @@ async function main() {
   let practiceQuestions = [];
 
   resetQuestionIdCounter();
+
+  // 初級：スプレッドシートの製品データに依存しない、静的な基礎知識問題
+  const basicConceptQuestions = generateBasicConceptQuestions();
+  console.log(`  [基礎知識（初級）] ${basicConceptQuestions.length}問を生成`);
+  knowledgeQuestions = knowledgeQuestions.concat(basicConceptQuestions);
 
   for (const conf of SHEET_CONFIG) {
     const products = await loadProductsFromSheet(conf);
