@@ -270,7 +270,7 @@ function buildExpGaugeElement(level, exp, totalExp) {
 
   const levelSpan = document.createElement("span");
   levelSpan.className = "exp-gauge-level";
-  levelSpan.textContent = `Lv.${level}`;
+  levelSpan.textContent = `プレイヤーLv.${level}`;
 
   const titleSpan = document.createElement("span");
   titleSpan.className = "exp-gauge-title";
@@ -846,7 +846,7 @@ function playFanfare() {
 }
 
 // ---- 紙吹雪演出 ----
-const CONFETTI_COLORS = ["#ff7a3d", "#1e6f5c", "#ffd166", "#4d96ff", "#ff5252", "#35b38a"];
+const CONFETTI_COLORS = ["#22e3ff", "#ff31d8", "#3dffa0", "#7b2ff7", "#f2c94c", "#7ef1ff"];
 
 function launchConfetti(count) {
   count = count || 40;
@@ -996,6 +996,22 @@ function getResultMessage(rate) {
   if (rate >= 60) return "👍 任務完了。あと一歩でエキスパートクラス。";
   if (rate >= 40) return "💪 再挑戦推奨。解析ログで弱点を潰そう。";
   return "📚 適応中。まずは基礎エリアから立て直そう。";
+}
+
+// 未攻略データ（要再挑戦リスト）や今回の成績をもとに、次に挑むべきミッションを提案する
+function getRecommendedMissionText(rate, wrongCount, difficultyFilter) {
+  if (wrongCount > 0) {
+    return "🧭 次の推奨ミッション：要再挑戦リストに挑戦して未攻略データを潰そう";
+  }
+  if (rate === 100) {
+    if (difficultyFilter === "初級") return "🧭 次の推奨ミッション：中級エリアに挑戦してみよう";
+    if (difficultyFilter === "中級") return "🧭 次の推奨ミッション：上級エリアに挑戦してみよう";
+    return "🧭 次の推奨ミッション：別のエリアで力試しをしよう";
+  }
+  if (rate < 60) {
+    return "🧭 次の推奨ミッション：同じエリアをもう一度攻略しよう";
+  }
+  return "🧭 次の推奨ミッション：新しいエリアに挑戦しよう";
 }
 
 // ---- 起動時の初期化 ----
@@ -1272,10 +1288,10 @@ function setupStartScreen() {
 let currentRankingType = "overall";
 
 const RANKING_SUBCOPY = {
-  overall: "制圧率が高い順に表示しています（上位100名）",
+  overall: "正答率が高い順に表示しています（上位100名）",
   weekly: "直近7日間の正解数が多い順に表示しています（上位100名）",
   combo: "最大コンボ数が多い順に表示しています（上位100名）",
-  suppression: "制圧率が高い順に表示しています（上位100名）",
+  suppression: "正答率が高い順に表示しています（上位100名）",
   missions: "累計解答数が多い順に表示しています（上位100名）",
   review: "要再挑戦リストの復習正解数が多い順に表示しています（上位100名）"
 };
@@ -1309,7 +1325,7 @@ function buildRankingStatsLines(type, row) {
       };
     case "suppression":
       return {
-        headline: `制圧率 ${row.best_rate}%`,
+        headline: `正答率 ${row.best_rate}%`,
         detail: [levelLine]
       };
     case "missions":
@@ -1841,6 +1857,11 @@ async function renderResultScreen() {
   animateCountUp(maxComboEl, state.maxSessionCombo, (v) => `${v}`, 700);
 
   document.getElementById("result-message").textContent = getResultMessage(rate);
+  document.getElementById("result-next-mission").textContent = getRecommendedMissionText(
+    rate,
+    currentUserRecord ? currentUserRecord.wrongQuestionIds.length : 0,
+    state.level
+  );
 
   const knowledgeAnswers = state.userAnswers.filter((a) => a.question.mode === "knowledge");
   const practiceAnswers = state.userAnswers.filter((a) => a.question.mode === "practice");
@@ -2017,6 +2038,10 @@ function showScreen(id) {
   // ここでscreen-userがアクティブな間だけ表示する
   const diveBg = document.getElementById("dive-bg");
   if (diveBg) diveBg.hidden = id !== "screen-user";
+  // 通常画面用のアンビエント背景（#cyber-bg）は、ログイン画面ではより演出の
+  // 強い#dive-bgに任せるため隠す
+  const cyberBg = document.getElementById("cyber-bg");
+  if (cyberBg) cyberBg.hidden = id === "screen-user";
   // ダイブ画面表示中は上下左右のスワイプでページ自体が動かないようにする
   // （端末のオーバースクロール／ラバーバンドで背景の白が見えるのを防ぐ）
   document.documentElement.classList.toggle("dive-active", id === "screen-user");

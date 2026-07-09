@@ -7,7 +7,7 @@
 <!-- style.css / script.js を編集したら ?v= の数字を必ず増やすこと。
      増やさないと、ブラウザにキャッシュされた古いファイルが
      読み込まれ続け、コード修正がユーザーの端末に反映されないため。 -->
-<link rel="stylesheet" href="style.css?v=15">
+<link rel="stylesheet" href="style.css?v=16">
 </head>
 <body>
 
@@ -31,12 +31,29 @@
 <!-- 連続正解（ストリーク）を知らせるトースト通知 -->
 <div id="streak-toast" class="streak-toast" hidden></div>
 
+<!-- アプリ全体に共通の背景演出（ネオングリッド・浮遊する光の粒子）。
+     ログイン画面のみ、より演出の強い#dive-bgに切り替える -->
+<div id="cyber-bg" class="cyber-bg" aria-hidden="true">
+  <div class="cyber-bg-glow cyber-bg-glow-cyan"></div>
+  <div class="cyber-bg-glow cyber-bg-glow-magenta"></div>
+  <div class="cyber-bg-grid"></div>
+  <div class="cyber-bg-particles"></div>
+</div>
+
 <!-- ダイブ画面（ログイン画面）専用の背景演出。position:fixedがscreen-fade-in
      アニメーション中のtransformに閉じ込められないよう、#screen-userの外に置き、
      showScreen()でscreen-userがアクティブな時だけhidden属性を切り替える -->
 <div id="dive-bg" class="dive-bg" aria-hidden="true" hidden>
   <div class="dive-grid"></div>
   <div class="dive-scanline"></div>
+  <!-- 奥へ続くネオンゲート／データトンネル演出 -->
+  <div class="dive-gate">
+    <div class="dive-gate-ring dive-gate-ring-1"></div>
+    <div class="dive-gate-ring dive-gate-ring-2"></div>
+    <div class="dive-gate-ring dive-gate-ring-3"></div>
+    <div class="dive-gate-ring dive-gate-ring-4"></div>
+    <div class="dive-gate-ring dive-gate-ring-5"></div>
+  </div>
 </div>
 <!-- ダイブ演出：意識が仮想空間へ同期していく中間演出。タップでスキップ可能 -->
 <div id="dive-connecting-overlay" class="dive-connecting-overlay" hidden>
@@ -222,8 +239,8 @@
     <div class="ranking-tabs" id="ranking-tabs">
       <button type="button" class="ranking-tab-btn selected" data-ranking="overall">総合</button>
       <button type="button" class="ranking-tab-btn" data-ranking="weekly">今週</button>
-      <button type="button" class="ranking-tab-btn" data-ranking="combo">連撃</button>
-      <button type="button" class="ranking-tab-btn" data-ranking="suppression">制圧率</button>
+      <button type="button" class="ranking-tab-btn" data-ranking="combo">コンボ</button>
+      <button type="button" class="ranking-tab-btn" data-ranking="suppression">正答率</button>
       <button type="button" class="ranking-tab-btn" data-ranking="missions">任務数</button>
       <button type="button" class="ranking-tab-btn" data-ranking="review">復習</button>
     </div>
@@ -317,10 +334,11 @@
     <h2 class="result-heading">任務結果</h2>
     <p id="new-record-banner" class="new-record-banner" hidden>🏆 自己ベスト更新！</p>
     <p id="result-message" class="result-message"></p>
+    <p id="result-next-mission" class="result-next-mission"></p>
 
     <!-- 今回獲得したEXP・レベルゲージ（結果画面でまとめて反映・アニメーション表示） -->
     <div class="card">
-      <h3 class="card-title">経験値</h3>
+      <h3 class="card-title">EXP</h3>
       <p id="result-exp-gained" class="result-exp-gained"></p>
       <div id="exp-gauge-result" class="exp-gauge-wrap"></div>
     </div>
@@ -413,6 +431,6 @@
 
 </div>
 
-<script src="script.js?v=20"></script>
+<script src="script.js?v=21"></script>
 </body>
 </html>
