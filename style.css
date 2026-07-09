@@ -1,3 +1,4 @@
+@charset "UTF-8";
 /* ============================================================
    全体の基本設定
    ============================================================= */
@@ -317,18 +318,196 @@ body {
 }
 
 /* ============================================================
-   ユーザー入力画面／ユーザー切り替えバー
+   ダイブ画面（ログイン画面）
+   ----------------------------------------------------------------
+   アプリの中で最も世界観を作り込む画面。「仮想訓練空間への接続」演出として
+   ダークな背景・グリッド・発光する認証パネルで構成する。他の画面（明るい
+   テーマ）とは意図的にトーンを変えている。
    ============================================================= */
-.user-desc {
-  margin: 0 0 12px;
-  font-size: 0.85rem;
-  color: var(--color-muted);
+.dive-screen {
+  position: relative;
+  z-index: 1;
+  min-height: calc(100vh - 64px);
+  text-align: center;
+  color: #eaf6f1;
+}
+/* .screen.active（display:block）より詳細度を上げて、ダイブ画面がアクティブな
+   間だけ縦方向センタリング用のflexレイアウトに切り替える */
+.screen.active.dive-screen {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.dive-bg {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  background:
+    radial-gradient(ellipse at 50% -10%, rgba(30, 111, 92, 0.35), transparent 55%),
+    linear-gradient(180deg, #0a1614 0%, #0d1f1b 45%, #091311 100%);
+}
+.dive-grid {
+  position: absolute;
+  inset: -2px;
+  background-image:
+    linear-gradient(rgba(126, 231, 197, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(126, 231, 197, 0.08) 1px, transparent 1px);
+  background-size: 34px 34px;
+  animation: dive-grid-drift 18s linear infinite;
+}
+@keyframes dive-grid-drift {
+  from { background-position: 0 0, 0 0; }
+  to { background-position: 0 340px, 340px 0; }
+}
+.dive-scanline {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 120px;
+  background: linear-gradient(180deg, rgba(126, 231, 197, 0) 0%, rgba(126, 231, 197, 0.10) 50%, rgba(126, 231, 197, 0) 100%);
+  animation: dive-scanline-sweep 5s ease-in-out infinite;
+}
+@keyframes dive-scanline-sweep {
+  0% { top: -120px; }
+  100% { top: 100%; }
+}
+.dive-status-line {
+  margin: 0 0 18px;
+  font-family: "Courier New", monospace;
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  color: #7ee7c5;
+  opacity: 0.85;
+}
+.dive-status-line::before {
+  content: "● ";
+  animation: dive-status-blink 1.6s ease-in-out infinite;
+}
+@keyframes dive-status-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
+}
+.dive-title {
+  margin: 0 0 10px;
+  font-size: 2.1rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: #eafff6;
+  text-shadow: 0 0 12px rgba(126, 231, 197, 0.55), 0 0 32px rgba(126, 231, 197, 0.25);
+}
+.dive-subcopy {
+  margin: 0 0 4px;
+  font-size: 0.95rem;
+  color: #b9d8cd;
+}
+.dive-tag {
+  margin: 0 0 28px;
+  font-size: 0.78rem;
+  color: #6f9c8c;
+  letter-spacing: 0.04em;
+}
+.dive-panel {
+  max-width: 380px;
+  margin: 0 auto;
+  padding: 24px 20px;
+  border-radius: 16px;
+  background: rgba(15, 38, 33, 0.55);
+  border: 1px solid rgba(126, 231, 197, 0.28);
+  box-shadow: 0 0 0 1px rgba(126, 231, 197, 0.06) inset, 0 20px 50px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(6px);
   text-align: left;
 }
-#username-input,
-#pin-input {
-  margin-bottom: 8px;
+.dive-field-label {
+  display: block;
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  color: #7ee7c5;
+  margin: 0 0 6px;
 }
+.dive-field-label:not(:first-child) {
+  margin-top: 14px;
+}
+.dive-input {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(126, 231, 197, 0.35);
+  background: rgba(5, 18, 15, 0.6);
+  color: #eafff6;
+  font-size: 1rem;
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.dive-input::placeholder {
+  color: #5c8578;
+}
+.dive-input:focus {
+  border-color: #7ee7c5;
+  box-shadow: 0 0 0 3px rgba(126, 231, 197, 0.18);
+}
+.dive-btn-primary {
+  display: block;
+  width: 100%;
+  margin-top: 18px;
+  padding: 14px;
+  border: none;
+  border-radius: 10px;
+  background: linear-gradient(135deg, var(--color-accent), #ff9a5c);
+  color: #241205;
+  font-size: 1.05rem;
+  font-weight: bold;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  box-shadow: 0 8px 22px rgba(255, 122, 61, 0.35);
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+.dive-btn-primary:active {
+  transform: scale(0.97);
+  box-shadow: 0 4px 12px rgba(255, 122, 61, 0.3);
+}
+.dive-panel .warning-text {
+  color: #ff8a8a;
+  margin: 12px 0 0;
+  font-size: 0.82rem;
+}
+.dive-footnote {
+  max-width: 380px;
+  margin: 20px auto 0;
+  font-size: 0.76rem;
+  line-height: 1.6;
+  color: #6f9c8c;
+}
+.dive-connecting-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 250;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(6, 16, 14, 0.92);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+.dive-connecting-overlay.show {
+  opacity: 1;
+}
+.dive-connecting-text {
+  font-family: "Courier New", monospace;
+  font-size: 0.95rem;
+  letter-spacing: 0.06em;
+  color: #7ee7c5;
+  text-shadow: 0 0 10px rgba(126, 231, 197, 0.5);
+  animation: dive-text-pulse 1.4s ease-in-out infinite;
+}
+@keyframes dive-text-pulse {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+
+/* ============================================================
+   ユーザー切り替えバー（スタート画面）
+   ============================================================= */
 .user-bar {
   display: flex;
   align-items: center;

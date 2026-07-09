@@ -342,13 +342,13 @@ const CATEGORY_ORDER = [
 // 「不正解問題」「正解問題」はカテゴリ一覧の中に混ぜて選べるようにする特別な
 // 擬似カテゴリ。実際のカテゴリタグではなく、現在のユーザーの不正解/正解済み
 // リストへのID一致で絞り込む。
-const WRONG_CATEGORY = "不正解問題";
+const WRONG_CATEGORY = "要再挑戦リスト";
 const CORRECT_CATEGORY = "正解問題";
 
 // アプリの状態（グローバル管理・現在のセッションに関するものだけ）
 const state = {
   mode: null,        // "knowledge" | "practice" | "mix"
-  category: "全カテゴリ",
+  category: "全エリア",
   level: "全レベル",  // "全レベル" | "初級" | "中級" | "上級"（出題の難易度フィルタ。EXPのユーザーレベルとは別物）
   countOption: null, // "5" | "10" | "20" | "all"
   sessionQuestions: [],
@@ -361,6 +361,7 @@ const state = {
   // ---- EXP関連（このセッション内だけで完結し、結果画面でまとめてサーバーへ反映する） ----
   sessionExp: 0,             // 今回のセッションで積算した獲得EXP
   sessionCombo: 0,           // EXPボーナス判定用のセッション内連続正解数（連続正解バッジ用のcurrentStreakとは別管理）
+  maxSessionCombo: 0,        // 今回のセッションで到達した最大コンボ数（任務結果画面「最大連撃数」用）
   comboBonusesGranted: new Set(), // このセッション内で既に付与済みのコンボ段階（3/5/10/15/20）
   tenQuestionBonusGranted: false  // 「10問連続プレイ」ボーナスを既に付与したか
 };
@@ -622,7 +623,7 @@ function showStreakToast(streak) {
   const toast = document.getElementById("streak-toast");
   if (!toast) return;
 
-  toast.textContent = `🔥 ${streak}連続正解！`;
+  toast.textContent = `🔥 ${streak}コンボ！`;
   toast.hidden = false;
   void toast.offsetWidth; // 再アニメーションさせるための強制リフロー
   toast.classList.add("show");
@@ -675,7 +676,7 @@ function updateStreakBadge() {
   if (!badge) return;
   const streak = currentUserRecord ? currentUserRecord.currentStreak : 0;
   if (streak >= 2) {
-    badge.textContent = `🔥 ${streak}連続`;
+    badge.textContent = `🔥 ${streak}コンボ`;
     badge.hidden = false;
   } else {
     badge.hidden = true;
@@ -712,17 +713,17 @@ function renderBestRecordOnStart() {
   }
   const parts = [];
   if (r.bestRate > 0) parts.push(`自己ベスト正答率 ${r.bestRate}%`);
-  if (r.bestStreak > 0) parts.push(`最大連続正解 ${r.bestStreak}問`);
+  if (r.bestStreak > 0) parts.push(`最大コンボ ${r.bestStreak}`);
   el.textContent = `🏆 ${r.userName}さんの自己ベスト：` + parts.join(" ／ ");
 }
 
 // 結果に応じた一言メッセージ
 function getResultMessage(rate) {
-  if (rate === 100) return "🎉 パーフェクト！完璧です！";
-  if (rate >= 80) return "✨ 素晴らしい成績です！";
-  if (rate >= 60) return "👍 いい調子！あと少しで上級者です";
-  if (rate >= 40) return "💪 もう一歩！復習して伸ばしましょう";
-  return "📚 まずは基礎から復習していきましょう";
+  if (rate === 100) return "🎉 完全制圧！ミッションを完璧に突破した。";
+  if (rate >= 80) return "✨ 任務完了。優秀な攻略だった。";
+  if (rate >= 60) return "👍 任務完了。あと一歩でエキスパートクラス。";
+  if (rate >= 40) return "💪 再挑戦推奨。解析ログで弱点を潰そう。";
+  return "📚 適応中。まずは基礎エリアから立て直そう。";
 }
 
 // ---- 起動時の初期化 ----
@@ -761,40 +762,55 @@ function setupUserScreen() {
 }
 
 // 入力されたユーザー名＋PINでログインし（未登録ならそのPINで新規登録）、
-// そのユーザー専用の成績データをSupabaseから読み込む
+// そのプレイヤー専用の成績データをSupabaseから読み込む
 async function startAsUser(rawName, rawPin) {
   const trimmedName = String(rawName || "").trim();
   const trimmedPin = String(rawPin || "").trim();
   const warningEl = document.getElementById("username-warning");
 
   if (!trimmedName) {
-    warningEl.textContent = "ユーザー名を入力してください。";
+    warningEl.textContent = "プレイヤーIDを入力してください。";
     return;
   }
   if (!/^\d{4,}$/.test(trimmedPin)) {
-    warningEl.textContent = "PINは4桁以上の数字で入力してください。";
+    warningEl.textContent = "認証キーは4桁以上の数字で入力してください。";
     return;
   }
 
   const startBtn = document.getElementById("btn-user-start");
-  warningEl.textContent = "ログイン中…";
+  const connectingOverlay = document.getElementById("dive-connecting-overlay");
+  const connectingText = document.getElementById("dive-connecting-text");
+  warningEl.textContent = "";
   startBtn.disabled = true;
+  connectingText.textContent = "仮想訓練空間へ接続中...";
+  connectingOverlay.hidden = false;
+  void connectingOverlay.offsetWidth;
+  connectingOverlay.classList.add("show");
 
   try {
     currentUserRecord = await loginUser(trimmedName, trimmedPin);
     safeLocalStorageSet(LAST_USERNAME_KEY, trimmedName);
 
-    warningEl.textContent = "";
-    document.getElementById("current-user-label").textContent = `ユーザー：${currentUserRecord.userName}`;
+    document.getElementById("current-user-label").textContent = `プレイヤー：${currentUserRecord.userName}`;
     renderBestRecordOnStart();
     refreshAllExpGauges();
     updateDataStatusDetail();
-    if (state.mode) populateCategorySelect(); // 「不正解問題」「正解問題」カテゴリの有無を再評価する
+    if (state.mode) populateCategorySelect(); // 「要再挑戦リスト」「正解問題」カテゴリの有無を再評価する
     validateStartButton();
 
+    // 「接続完了」を一瞬見せてから任務端末（スタート画面）へ遷移する
+    connectingText.textContent = "接続完了。任務端末を起動します。";
+    await new Promise((resolve) => setTimeout(resolve, 500));
     showScreen("screen-start");
+    connectingOverlay.classList.remove("show");
+    setTimeout(() => { connectingOverlay.hidden = true; }, 300);
   } catch (err) {
-    warningEl.textContent = err.message || "ログインに失敗しました。もう一度お試しください。";
+    connectingOverlay.classList.remove("show");
+    setTimeout(() => { connectingOverlay.hidden = true; }, 300);
+    warningEl.textContent =
+      err.message === "ユーザー名またはPINが正しくありません"
+        ? "認証エラー：プレイヤーIDまたは認証キーを確認してください。"
+        : (err.message || "認証エラー：接続に失敗しました。もう一度お試しください。");
   } finally {
     startBtn.disabled = false;
   }
@@ -807,7 +823,7 @@ async function loadAllData() {
   const statusText = document.getElementById("data-status-text");
   const reloadBtn = document.getElementById("btn-reload-data");
 
-  statusText.textContent = "問題データを読み込み中…";
+  statusText.textContent = "任務データを同期中…";
   statusText.className = "status-loading";
   reloadBtn.hidden = true;
   state.dataLoaded = false;
@@ -823,7 +839,7 @@ async function loadAllData() {
 
     if (rows.length === 0) {
       statusText.textContent =
-        "問題データがまだありません。scripts/sync-questions.js を実行してSupabaseに問題を登録してください。";
+        "任務データがまだありません。scripts/sync-questions.js を実行してSupabaseに任務を登録してください。";
       statusText.className = "status-warning";
       reloadBtn.hidden = false;
       return;
@@ -832,7 +848,7 @@ async function loadAllData() {
     knowledgeQuestions = rows.filter((r) => r.mode === "knowledge").map(questionFromRow);
     practiceQuestions = rows.filter((r) => r.mode === "practice").map(questionFromRow);
 
-    statusText.textContent = "問題データ読み込み済み";
+    statusText.textContent = "任務データ同期完了";
     statusText.className = "status-ok";
     reloadBtn.hidden = false;
     state.dataLoaded = true;
@@ -881,10 +897,10 @@ function updateDataStatusDetail() {
   }
 
   const items = [
-    `問題数：${knowledgeQuestions.length + practiceQuestions.length}問`,
-    `知識問題：${knowledgeQuestions.length}問`,
-    `実践問題：${practiceQuestions.length}問`,
-    `不正解リスト：${currentUserRecord ? currentUserRecord.wrongQuestionIds.length : 0}問`
+    `任務数：${knowledgeQuestions.length + practiceQuestions.length}件`,
+    `基礎任務：${knowledgeQuestions.length}件`,
+    `判断任務：${practiceQuestions.length}件`,
+    `要再挑戦リスト：${currentUserRecord ? currentUserRecord.wrongQuestionIds.length : 0}件`
   ];
   items.forEach((text) => {
     const li = document.createElement("li");
@@ -988,7 +1004,7 @@ async function renderRankingScreen() {
       ));
       stats.appendChild(document.createElement("br"));
       stats.appendChild(document.createTextNode(
-        `正答数 ${row.best_score}問 ／ 連続 ${row.current_streak}問（最高${row.best_streak}問） ／ 累計 ${row.total_answered}問`
+        `正答数 ${row.best_score}問 ／ コンボ ${row.current_streak}（最高${row.best_streak}） ／ 累計 ${row.total_answered}問`
       ));
 
       item.appendChild(rank);
@@ -997,7 +1013,7 @@ async function renderRankingScreen() {
       listEl.appendChild(item);
     });
   } catch (err) {
-    errorEl.textContent = `ランキングの取得に失敗しました：${err.message}`;
+    errorEl.textContent = `攻略者ボードの取得に失敗しました：${err.message}`;
     errorEl.hidden = false;
   }
 }
@@ -1021,7 +1037,7 @@ function populateCategorySelect() {
   // 表示順リストにないカテゴリ（将来の新ジャンル）も末尾に追加する
   present.forEach((c) => { if (!ordered.includes(c)) ordered.push(c); });
 
-  const options = ["全カテゴリ"];
+  const options = ["全エリア"];
 
   const wrongIds = currentUserRecord ? currentUserRecord.wrongQuestionIds : [];
   const correctIds = currentUserRecord ? currentUserRecord.correctQuestionIds : [];
@@ -1035,12 +1051,12 @@ function populateCategorySelect() {
   options.forEach((cat) => {
     const opt = document.createElement("option");
     opt.value = cat;
-    if (cat === WRONG_CATEGORY) opt.textContent = `不正解問題（${wrongCountInPool}問）`;
+    if (cat === WRONG_CATEGORY) opt.textContent = `要再挑戦リスト（${wrongCountInPool}問）`;
     else if (cat === CORRECT_CATEGORY) opt.textContent = `正解問題（${correctCountInPool}問）`;
     else opt.textContent = cat;
     select.appendChild(opt);
   });
-  state.category = "全カテゴリ";
+  state.category = "全エリア";
 }
 
 function validateStartButton() {
@@ -1054,7 +1070,7 @@ function beginQuizSession() {
 
   if (pool.length === 0) {
     document.getElementById("start-warning").textContent =
-      "選択した条件に合う問題がありません。カテゴリやレベルを変更してください。";
+      "選択した条件に合う任務がありません。エリアやレベルを変更してください。";
     return;
   }
   document.getElementById("start-warning").textContent = "";
@@ -1076,6 +1092,7 @@ function beginQuizSession() {
 function resetSessionExpTracking() {
   state.sessionExp = 0;
   state.sessionCombo = 0;
+  state.maxSessionCombo = 0;
   state.comboBonusesGranted = new Set();
   state.tenQuestionBonusGranted = false;
 }
@@ -1092,7 +1109,7 @@ function buildFilteredPool(mode, category, level) {
   } else if (category === CORRECT_CATEGORY) {
     const correctIds = currentUserRecord ? currentUserRecord.correctQuestionIds : [];
     pool = pool.filter((q) => correctIds.includes(q.id));
-  } else if (category && category !== "全カテゴリ") {
+  } else if (category && category !== "全エリア") {
     pool = pool.filter((q) => q.category === category);
   }
 
@@ -1164,7 +1181,7 @@ function renderQuestion() {
   document.getElementById("quiz-progress").textContent =
     `問題 ${state.currentIndex + 1} / ${state.sessionQuestions.length}`;
   document.getElementById("quiz-mode-badge").textContent =
-    q.mode === "knowledge" ? "知識問題" : "実践提案";
+    q.mode === "knowledge" ? "基礎任務" : "判断任務";
   document.getElementById("quiz-category-badge").textContent = q.category;
   document.getElementById("quiz-difficulty-badge").textContent = q.difficulty;
   updateStreakBadge();
@@ -1323,6 +1340,7 @@ function accrueSessionExp(isCorrect) {
 
   if (isCorrect) {
     state.sessionCombo++;
+    if (state.sessionCombo > state.maxSessionCombo) state.maxSessionCombo = state.sessionCombo;
     const bonus = COMBO_BONUS_EXP[state.sessionCombo];
     // コンボボーナスは同じセッション内で同じ段階に達しても1回だけ付与する
     if (bonus && !state.comboBonusesGranted.has(state.sessionCombo)) {
@@ -1432,17 +1450,27 @@ function goToNextQuestion() {
   }
 }
 
-// ---- 結果画面の描画（表示するのは現在ログイン中のユーザーの成績のみ） ----
+// ---- 任務結果画面の描画（表示するのは現在ログイン中のプレイヤーの成績のみ） ----
 async function renderResultScreen() {
   const total = state.userAnswers.length;
   const correctCount = state.userAnswers.filter((a) => a.correct).length;
   const rate = total > 0 ? Math.round((correctCount / total) * 100) : 0;
+  const damageCount = total - correctCount;
+  // 任務達成率：予定していた問題数のうち実際に回答できた割合（途中中断すると100%未満になる）
+  const plannedTotal = state.sessionQuestions.length;
+  const completionRate = plannedTotal > 0 ? Math.round((total / plannedTotal) * 100) : 0;
 
-  // スコア・正答率は0からカウントアップさせて演出する
+  // 各種スコアは0からカウントアップさせて演出する
   const scoreEl = document.getElementById("result-score");
   const rateEl = document.getElementById("result-rate");
+  const completionRateEl = document.getElementById("result-completion-rate");
+  const damageCountEl = document.getElementById("result-damage-count");
+  const maxComboEl = document.getElementById("result-max-combo");
   animateCountUp(scoreEl, correctCount, (v) => `${v} / ${total}`, 700);
   animateCountUp(rateEl, rate, (v) => `${v}%`, 700);
+  animateCountUp(completionRateEl, completionRate, (v) => `${v}%`, 700);
+  animateCountUp(damageCountEl, damageCount, (v) => `${v}`, 700);
+  animateCountUp(maxComboEl, state.maxSessionCombo, (v) => `${v}`, 700);
 
   document.getElementById("result-message").textContent = getResultMessage(rate);
 
@@ -1539,7 +1567,7 @@ async function renderResultScreen() {
       const li = document.createElement("li");
       const modeTag = document.createElement("span");
       modeTag.className = "wrong-q-mode";
-      modeTag.textContent = a.question.mode === "knowledge" ? "知識" : "実践提案";
+      modeTag.textContent = a.question.mode === "knowledge" ? "基礎" : "判断";
       li.appendChild(modeTag);
       li.appendChild(document.createTextNode(a.question.question));
       wrongList.appendChild(li);
@@ -1579,7 +1607,7 @@ function startReviewSession() {
 // ---- 最初からやり直す（ユーザーはログインしたまま） ----
 function resetToStart() {
   state.mode = null;
-  state.category = "全カテゴリ";
+  state.category = "全エリア";
   state.level = "全レベル";
   state.countOption = null;
   state.sessionQuestions = [];
@@ -1606,6 +1634,11 @@ function resetToStart() {
 function showScreen(id) {
   document.querySelectorAll(".screen").forEach((el) => el.classList.remove("active"));
   document.getElementById(id).classList.add("active");
+  // ダイブ画面（ログイン画面）専用の背景演出は、position:fixedが画面切り替えの
+  // transformアニメーションに閉じ込められないよう#screen-userの外に置いているため、
+  // ここでscreen-userがアクティブな間だけ表示する
+  const diveBg = document.getElementById("dive-bg");
+  if (diveBg) diveBg.hidden = id !== "screen-user";
 }
 
 // ---- アプリ起動 ----
