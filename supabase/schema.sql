@@ -106,7 +106,7 @@ begin
     raise exception 'PINは4桁以上で入力してください';
   end if;
 
-  select * into v_user from users where username = p_username;
+  select * into v_user from users u where u.username = p_username;
 
   if v_user.id is null then
     insert into users (username, pin_hash)
@@ -144,16 +144,16 @@ begin
   insert into answer_history (user_id, question_id, correct, mode, category)
   values (p_user_id, p_question_id, p_correct, p_mode, p_category);
 
-  select case when p_correct then current_streak + 1 else 0 end
+  select case when p_correct then u.current_streak + 1 else 0 end
   into v_new_streak
-  from users where id = p_user_id;
+  from users u where u.id = p_user_id;
 
-  update users set
-    total_answered = total_answered + 1,
-    total_correct = total_correct + (case when p_correct then 1 else 0 end),
+  update users u set
+    total_answered = u.total_answered + 1,
+    total_correct = u.total_correct + (case when p_correct then 1 else 0 end),
     current_streak = v_new_streak,
-    best_streak = greatest(best_streak, v_new_streak)
-  where id = p_user_id;
+    best_streak = greatest(u.best_streak, v_new_streak)
+  where u.id = p_user_id;
 
   return query
     select u.current_streak, u.best_streak, u.total_answered,

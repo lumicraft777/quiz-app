@@ -1,0 +1,2 @@
+# Supabaseのsecret key等、公開してはいけない値を含む
+.env
