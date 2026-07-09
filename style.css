@@ -411,6 +411,165 @@ body {
 }
 
 /* ============================================================
+   経験値（EXP）ゲージ
+   ============================================================= */
+.exp-gauge-wrap {
+  margin-bottom: 16px;
+}
+.exp-gauge {
+  background: var(--color-card);
+  border: 2px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+}
+.exp-gauge-header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.exp-gauge-level {
+  font-weight: bold;
+  font-size: 1.1rem;
+  color: var(--color-primary-dark);
+}
+.exp-gauge-title {
+  font-weight: bold;
+  font-size: 0.95rem;
+  color: var(--color-accent);
+}
+.exp-gauge-max {
+  margin-left: auto;
+  font-size: 0.75rem;
+  font-weight: bold;
+  color: #fff;
+  background: linear-gradient(135deg, #ff9d3d, #ff5252);
+  padding: 3px 10px;
+  border-radius: 999px;
+}
+.exp-gauge-track {
+  height: 12px;
+  background: #e3ece9;
+  border-radius: 999px;
+  overflow: hidden;
+}
+.exp-gauge-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, var(--color-primary), #35b38a);
+  border-radius: 999px;
+  transition: width 0.8s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.exp-gauge-footer {
+  margin-top: 6px;
+  font-size: 0.78rem;
+  color: var(--color-muted);
+  text-align: right;
+}
+
+/* クイズ画面用のコンパクト表示（情報量は同じだが余白・文字を詰める） */
+.exp-gauge-wrap-compact .exp-gauge {
+  padding: 8px 12px;
+}
+.exp-gauge-wrap-compact .exp-gauge-header {
+  margin-bottom: 5px;
+}
+.exp-gauge-wrap-compact .exp-gauge-level {
+  font-size: 0.9rem;
+}
+.exp-gauge-wrap-compact .exp-gauge-title {
+  font-size: 0.78rem;
+}
+.exp-gauge-wrap-compact .exp-gauge-track {
+  height: 8px;
+}
+.exp-gauge-wrap-compact .exp-gauge-footer {
+  font-size: 0.72rem;
+  margin-top: 4px;
+}
+
+.result-exp-gained {
+  text-align: center;
+  font-size: 1.15rem;
+  font-weight: bold;
+  color: var(--color-accent);
+  margin: 0 0 12px;
+}
+
+/* ============================================================
+   LEVEL UP / TITLE UPGRADE 演出
+   既存の正誤・コンボ演出よりも明確に盛大にする
+   ============================================================= */
+.levelup-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 25, 20, 0.65);
+  z-index: 300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+.levelup-overlay.show {
+  opacity: 1;
+}
+.levelup-card {
+  background: linear-gradient(160deg, #ffffff, #fff6ef);
+  border-radius: 20px;
+  padding: 32px 24px;
+  max-width: 420px;
+  width: 100%;
+  text-align: center;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+  transform: scale(0.85);
+  transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.levelup-overlay.show .levelup-card {
+  transform: scale(1);
+}
+.levelup-heading {
+  font-size: 1.6rem;
+  font-weight: bold;
+  color: var(--color-accent);
+  margin: 0 0 18px;
+}
+.levelup-transition {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 14px;
+}
+.levelup-level-old {
+  font-size: 1.1rem;
+  color: var(--color-muted);
+}
+.levelup-arrow {
+  font-size: 1.4rem;
+  color: var(--color-accent);
+}
+.levelup-level-new {
+  font-size: 1.7rem;
+  font-weight: bold;
+  color: var(--color-primary-dark);
+}
+.levelup-exp {
+  font-size: 1.15rem;
+  font-weight: bold;
+  color: var(--color-primary);
+  margin: 0 0 8px;
+}
+.levelup-subtext {
+  font-size: 0.95rem;
+  color: var(--color-accent);
+  font-weight: bold;
+  margin: 0 0 18px;
+}
+
+/* ============================================================
    データ読み込み状況の表示（クイズ開始ボタンの下に、控えめに表示）
    ============================================================= */
 .data-status-card {

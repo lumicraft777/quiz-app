@@ -209,6 +209,125 @@ function appendTextWithGlossary(container, text) {
 
 
 /* ================================================================
+   経験値（EXP）・レベル機能
+   ----------------------------------------------------------------
+   ・「学習が積み上がっている」実感を持たせるための仕組み。正解だけ
+     でなく不正解でも（学習したこととして）EXPが入る。
+   ・クイズ中はセッション内でEXPをローカル積算するだけにしておき、
+     結果画面表示時にまとめてSupabaseへ反映する（通信回数を抑える）。
+   ・レベルアップの計算式・称号一覧は仕様どおり。
+   ================================================================ */
+
+// レベルアップに必要なEXP（Lv.n → Lv.n+1 に必要な量）
+function getRequiredExp(level) {
+  return 50 * level;
+}
+
+// 5レベルごとに変わる称号一覧（固有名詞は含めない）
+const LEVEL_TITLES = [
+  { min: 1, max: 4, title: "新人アドバイザー" },
+  { min: 5, max: 9, title: "商品理解トレーニー" },
+  { min: 10, max: 14, title: "基礎提案アドバイザー" },
+  { min: 15, max: 19, title: "比較提案アドバイザー" },
+  { min: 20, max: 24, title: "蓄電池コンサル" },
+
+  { min: 25, max: 29, title: "停電対策コンサル" },
+  { min: 30, max: 34, title: "スマートハウスアドバイザー" },
+  { min: 35, max: 39, title: "家庭エネルギーアドバイザー" },
+  { min: 40, max: 44, title: "提案判断リーダー" },
+  { min: 45, max: 49, title: "営業提案リーダー" },
+
+  { min: 50, max: 54, title: "蓄電池提案プロ" },
+  { min: 55, max: 59, title: "スマートハウス提案プロ" },
+  { min: 60, max: 64, title: "家庭条件分析プロ" },
+  { min: 65, max: 69, title: "電力提案プロ" },
+  { min: 70, max: 74, title: "提案設計エキスパート" },
+
+  { min: 75, max: 79, title: "営業判断エキスパート" },
+  { min: 80, max: 84, title: "スマートライフコンサルタント" },
+  { min: 85, max: 89, title: "エネルギー提案マイスター" },
+  { min: 90, max: 94, title: "スマートハウスマイスター" },
+  { min: 95, max: 99, title: "営業提案マスター" },
+
+  { min: 100, max: 100, title: "スマートハウス営業王" }
+];
+
+function getLevelTitle(level) {
+  const matched = LEVEL_TITLES.find((item) => level >= item.min && level <= item.max);
+  return matched ? matched.title : "新人アドバイザー";
+}
+
+// コンボ到達時の一発ボーナスEXP（セッション内で同じ段階は1回だけ付与）
+const COMBO_BONUS_EXP = { 3: 5, 5: 10, 10: 25, 15: 40, 20: 60 };
+
+// ---- EXPゲージのDOM組み立て（スタート/クイズ/結果画面で共通利用） ----
+function buildExpGaugeElement(level, exp, totalExp) {
+  const wrap = document.createElement("div");
+  wrap.className = "exp-gauge";
+
+  const header = document.createElement("div");
+  header.className = "exp-gauge-header";
+
+  const levelSpan = document.createElement("span");
+  levelSpan.className = "exp-gauge-level";
+  levelSpan.textContent = `Lv.${level}`;
+
+  const titleSpan = document.createElement("span");
+  titleSpan.className = "exp-gauge-title";
+  titleSpan.textContent = getLevelTitle(level);
+
+  header.appendChild(levelSpan);
+  header.appendChild(titleSpan);
+
+  const track = document.createElement("div");
+  track.className = "exp-gauge-track";
+  const fill = document.createElement("div");
+  fill.className = "exp-gauge-fill";
+  track.appendChild(fill);
+
+  const footer = document.createElement("div");
+  footer.className = "exp-gauge-footer";
+
+  if (level >= 100) {
+    const maxSpan = document.createElement("span");
+    maxSpan.className = "exp-gauge-max";
+    maxSpan.textContent = "MAX LEVEL";
+    header.appendChild(maxSpan);
+    fill.style.width = "100%";
+    footer.textContent = `累計EXP：${totalExp.toLocaleString()} EXP`;
+  } else {
+    const required = getRequiredExp(level);
+    const rate = Math.min(100, Math.floor((exp / required) * 100));
+    fill.style.width = `${rate}%`;
+    const remaining = Math.max(0, required - exp);
+    footer.textContent = `EXP ${exp} / ${required}（次のレベルまであと${remaining}EXP）`;
+  }
+
+  wrap.appendChild(header);
+  wrap.appendChild(track);
+  wrap.appendChild(footer);
+  return wrap;
+}
+
+// 指定したコンテナ要素にEXPゲージを描画する（無ければ何もしない＝一部画面のみでもOK）
+function renderExpGaugeInto(containerId, level, exp, totalExp) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  container.innerHTML = "";
+  container.appendChild(buildExpGaugeElement(level ?? 1, exp ?? 0, totalExp ?? 0));
+}
+
+// ログイン中ユーザーのEXPゲージを、表示対象の全画面に反映する
+function refreshAllExpGauges() {
+  if (!currentUserRecord) return;
+  const { level, exp, totalExp } = currentUserRecord;
+  ["exp-gauge-start", "exp-gauge-quiz", "exp-gauge-result"].forEach((id) => {
+    renderExpGaugeInto(id, level, exp, totalExp);
+  });
+}
+
+
+/* ================================================================
    [パート2] 画面制御・クイズ進行ロジック（アプリ本体）
    ================================================================ */
 
@@ -229,14 +348,20 @@ const CORRECT_CATEGORY = "正解問題";
 const state = {
   mode: null,        // "knowledge" | "practice" | "mix"
   category: "全カテゴリ",
-  level: "全レベル",  // "全レベル" | "初級" | "中級" | "上級"
+  level: "全レベル",  // "全レベル" | "初級" | "中級" | "上級"（出題の難易度フィルタ。EXPのユーザーレベルとは別物）
   countOption: null, // "5" | "10" | "20" | "all"
   sessionQuestions: [],
   currentIndex: 0,
   userAnswers: [],   // { question, chosenText, correct }（今回セッション分の一覧表示用）
   selectedChoice: null,
   isReviewSession: false,
-  dataLoaded: false
+  dataLoaded: false,
+
+  // ---- EXP関連（このセッション内だけで完結し、結果画面でまとめてサーバーへ反映する） ----
+  sessionExp: 0,             // 今回のセッションで積算した獲得EXP
+  sessionCombo: 0,           // EXPボーナス判定用のセッション内連続正解数（連続正解バッジ用のcurrentStreakとは別管理）
+  comboBonusesGranted: new Set(), // このセッション内で既に付与済みのコンボ段階（3/5/10/15/20）
+  tenQuestionBonusGranted: false  // 「10問連続プレイ」ボーナスを既に付与したか
 };
 
 // このセッション中に自己ベストの連続正解記録を更新したかどうか
@@ -309,6 +434,9 @@ async function loginUser(username, pin) {
     bestStreak: row.best_streak,
     totalAnswered: row.total_answered,
     totalCorrect: row.total_correct,
+    level: row.level,
+    exp: row.exp,
+    totalExp: row.total_exp,
     wrongQuestionIds: statusRows.filter((r) => !r.correct).map((r) => r.question_id),
     correctQuestionIds: statusRows.filter((r) => r.correct).map((r) => r.question_id)
   };
@@ -505,6 +633,42 @@ function showStreakToast(streak) {
   }, 1400);
 }
 
+// ---- レベルアップ演出（既存の紙吹雪より派手にする） ----
+function playLevelUpSound(isTitleUpgrade) {
+  const notes = isTitleUpgrade
+    ? [523.25, 659.25, 783.99, 1046.5, 1318.51, 1567.98] // ド・ミ・ソ・ド・ミ・ソ（1オクターブ上まで駆け上がる）
+    : [659.25, 783.99, 987.77, 1318.51]; // ミ・ソ・シ・ミ
+  notes.forEach((freq, i) => playTone(freq, i * 0.1, 0.35, "triangle", 0.22));
+}
+
+function showLevelUpOverlay(oldLevel, newLevel, oldTitle, newTitle, isTitleUpgrade, expGained) {
+  const overlay = document.getElementById("levelup-overlay");
+  if (!overlay) return;
+
+  document.getElementById("levelup-heading").textContent = isTitleUpgrade
+    ? "🏆 TITLE UPGRADE！🏆"
+    : "⭐ LEVEL UP！⭐";
+  document.getElementById("levelup-old").textContent = `Lv.${oldLevel} ${oldTitle}`;
+  document.getElementById("levelup-new").textContent = `Lv.${newLevel} ${newTitle}`;
+  document.getElementById("levelup-exp").textContent = `+${expGained} EXP 獲得`;
+  document.getElementById("levelup-subtext").hidden = !isTitleUpgrade;
+
+  overlay.hidden = false;
+  void overlay.offsetWidth;
+  overlay.classList.add("show");
+
+  playLevelUpSound(isTitleUpgrade);
+  launchConfetti(isTitleUpgrade ? 140 : 100);
+
+  const closeBtn = document.getElementById("btn-levelup-close");
+  const close = () => {
+    overlay.classList.remove("show");
+    setTimeout(() => { overlay.hidden = true; }, 300);
+    closeBtn.removeEventListener("click", close);
+  };
+  closeBtn.addEventListener("click", close);
+}
+
 function updateStreakBadge() {
   const badge = document.getElementById("streak-badge");
   if (!badge) return;
@@ -622,6 +786,7 @@ async function startAsUser(rawName, rawPin) {
     warningEl.textContent = "";
     document.getElementById("current-user-label").textContent = `ユーザー：${currentUserRecord.userName}`;
     renderBestRecordOnStart();
+    refreshAllExpGauges();
     updateDataStatusDetail();
     if (state.mode) populateCategorySelect(); // 「不正解問題」「正解問題」カテゴリの有無を再評価する
     validateStartButton();
@@ -816,6 +981,11 @@ async function renderRankingScreen() {
       bEl.textContent = `正答率 ${row.best_rate}%`;
       stats.appendChild(bEl);
       stats.appendChild(document.createElement("br"));
+      // レベル・称号（既存の正答率順ランキングのロジックには手を加えていない。表示を追加するだけ）
+      stats.appendChild(document.createTextNode(
+        `Lv.${row.level ?? 1} ${getLevelTitle(row.level ?? 1)} ／ 累計EXP ${(row.total_exp ?? 0).toLocaleString()}`
+      ));
+      stats.appendChild(document.createElement("br"));
       stats.appendChild(document.createTextNode(
         `正答数 ${row.best_score}問 ／ 連続 ${row.current_streak}問（最高${row.best_streak}問） ／ 累計 ${row.total_answered}問`
       ));
@@ -894,9 +1064,19 @@ function beginQuizSession() {
   state.userAnswers = [];
   state.isReviewSession = state.category === WRONG_CATEGORY || state.category === CORRECT_CATEGORY;
   newStreakRecordThisSession = false;
+  resetSessionExpTracking();
 
   showScreen("screen-quiz");
   renderQuestion();
+}
+
+// このセッションのEXP積算・コンボボーナス・10問ボーナスの付与状況をリセットする
+// （通常のクイズ開始・不正解/正解問題の復習開始のどちらからも呼ぶ）
+function resetSessionExpTracking() {
+  state.sessionExp = 0;
+  state.sessionCombo = 0;
+  state.comboBonusesGranted = new Set();
+  state.tenQuestionBonusGranted = false;
 }
 
 function buildFilteredPool(mode, category, level) {
@@ -931,8 +1111,8 @@ function quitQuizEarly() {
   const ok = confirm(`ここまで${state.userAnswers.length}問回答済みです。ここで終了して結果を見ますか？`);
   if (!ok) return;
 
-  renderResultScreen();
   showScreen("screen-result");
+  renderResultScreen();
 }
 
 // ミックスモードでは知識問題・実践提案問題が偏りすぎないように抽出する
@@ -987,6 +1167,9 @@ function renderQuestion() {
   document.getElementById("quiz-category-badge").textContent = q.category;
   document.getElementById("quiz-difficulty-badge").textContent = q.difficulty;
   updateStreakBadge();
+  if (currentUserRecord) {
+    renderExpGaugeInto("exp-gauge-quiz", currentUserRecord.level, currentUserRecord.exp, currentUserRecord.totalExp);
+  }
 
   const progressPct = Math.round((state.currentIndex / state.sessionQuestions.length) * 100);
   document.getElementById("quiz-progress-bar").style.width = `${progressPct}%`;
@@ -1119,10 +1302,43 @@ function submitAnswer() {
 
   state.userAnswers.push({ question: q, chosenText, correct: isCorrect });
 
+  accrueSessionExp(isCorrect);
+
   setTimeout(() => {
     renderExplainScreen(q, chosenText, isCorrect);
     showScreen("screen-explain");
   }, 700);
+}
+
+// このセッション内で積算するだけのEXP計算（サーバーへの反映は結果画面でまとめて行う）。
+// 正解/不正解の基本EXP・解説を読む分・コンボボーナス・10問連続プレイボーナスをここで加算する。
+function accrueSessionExp(isCorrect) {
+  let gained = 0;
+
+  // 基本EXP：正解（復習問題なら+15、通常は+10）／不正解でも「学習した」として+3
+  gained += isCorrect ? (state.isReviewSession ? 15 : 10) : 3;
+  // 解説画面は回答後に必ず表示されるため、この時点で「解説まで読んだ」分を加算する
+  gained += 5;
+
+  if (isCorrect) {
+    state.sessionCombo++;
+    const bonus = COMBO_BONUS_EXP[state.sessionCombo];
+    // コンボボーナスは同じセッション内で同じ段階に達しても1回だけ付与する
+    if (bonus && !state.comboBonusesGranted.has(state.sessionCombo)) {
+      gained += bonus;
+      state.comboBonusesGranted.add(state.sessionCombo);
+    }
+  } else {
+    state.sessionCombo = 0;
+  }
+
+  state.sessionExp += gained;
+
+  // 10問連続プレイボーナス（セッション内で1回だけ）
+  if (state.userAnswers.length === 10 && !state.tenQuestionBonusGranted) {
+    state.sessionExp += 20;
+    state.tenQuestionBonusGranted = true;
+  }
 }
 
 function renderExplainScreen(q, chosenText, isCorrect) {
@@ -1207,8 +1423,8 @@ function renderChoiceBreakdown(q, chosenText) {
 function goToNextQuestion() {
   state.currentIndex++;
   if (state.currentIndex >= state.sessionQuestions.length) {
-    renderResultScreen();
     showScreen("screen-result");
+    renderResultScreen();
   } else {
     showScreen("screen-quiz");
     renderQuestion();
@@ -1216,7 +1432,7 @@ function goToNextQuestion() {
 }
 
 // ---- 結果画面の描画（表示するのは現在ログイン中のユーザーの成績のみ） ----
-function renderResultScreen() {
+async function renderResultScreen() {
   const total = state.userAnswers.length;
   const correctCount = state.userAnswers.filter((a) => a.correct).length;
   const rate = total > 0 ? Math.round((correctCount / total) * 100) : 0;
@@ -1249,6 +1465,43 @@ function renderResultScreen() {
     recordSessionResultForUser(currentUserRecord.id, correctCount, rate);
   }
   document.getElementById("new-record-banner").hidden = !isNewRecord;
+
+  // 経験値（EXP）はセッション中クライアント側で積算しておき、結果画面表示時に
+  // まとめてサーバーへ反映する（通信回数を抑えるため。反映はここで1回のみawaitする）
+  document.getElementById("result-exp-gained").textContent = `+${state.sessionExp} EXP 獲得！`;
+  if (currentUserRecord) {
+    const beforeLevel = currentUserRecord.level;
+    const beforeTitle = getLevelTitle(beforeLevel);
+    renderExpGaugeInto("exp-gauge-result", currentUserRecord.level, currentUserRecord.exp, currentUserRecord.totalExp);
+
+    if (state.sessionExp > 0) {
+      try {
+        const [expResult] = await supabaseRpc("rpc_apply_exp", {
+          p_user_id: currentUserRecord.id,
+          p_gained_exp: state.sessionExp
+        });
+        currentUserRecord.level = expResult.new_level;
+        currentUserRecord.exp = expResult.exp;
+        currentUserRecord.totalExp = expResult.total_exp;
+
+        // ゲージのアニメーションを見せるため、少し間を置いてから新しい値で再描画する
+        setTimeout(() => {
+          renderExpGaugeInto("exp-gauge-result", currentUserRecord.level, currentUserRecord.exp, currentUserRecord.totalExp);
+        }, 100);
+        refreshAllExpGauges();
+
+        if (expResult.new_level > beforeLevel) {
+          const afterTitle = getLevelTitle(expResult.new_level);
+          const titleChanged = afterTitle !== beforeTitle;
+          setTimeout(() => {
+            showLevelUpOverlay(beforeLevel, expResult.new_level, beforeTitle, afterTitle, titleChanged, state.sessionExp);
+          }, 900);
+        }
+      } catch (err) {
+        console.error("EXP反映に失敗しました:", err.message);
+      }
+    }
+  }
 
   // 高得点・自己ベスト更新時は紙吹雪でお祝いする
   if (rate === 100) {
@@ -1316,6 +1569,7 @@ function startReviewSession() {
   state.userAnswers = [];
   state.isReviewSession = true;
   newStreakRecordThisSession = false;
+  resetSessionExpTracking();
 
   showScreen("screen-quiz");
   renderQuestion();
@@ -1341,6 +1595,7 @@ function resetToStart() {
   document.getElementById("btn-start").disabled = true;
   document.getElementById("start-warning").textContent = "";
   renderBestRecordOnStart();
+  refreshAllExpGauges();
   updateDataStatusDetail();
 
   showScreen("screen-start");

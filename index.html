@@ -7,7 +7,7 @@
 <!-- style.css / script.js を編集したら ?v= の数字を必ず増やすこと。
      増やさないと、ブラウザにキャッシュされた古いファイルが
      読み込まれ続け、コード修正がユーザーの端末に反映されないため。 -->
-<link rel="stylesheet" href="style.css?v=9">
+<link rel="stylesheet" href="style.css?v=10">
 </head>
 <body>
 
@@ -30,6 +30,21 @@
 
 <!-- 連続正解（ストリーク）を知らせるトースト通知 -->
 <div id="streak-toast" class="streak-toast" hidden></div>
+
+<!-- LEVEL UP / TITLE UPGRADE演出（結果画面でのみ表示） -->
+<div id="levelup-overlay" class="levelup-overlay" hidden>
+  <div class="levelup-card">
+    <p id="levelup-heading" class="levelup-heading"></p>
+    <div class="levelup-transition">
+      <span id="levelup-old" class="levelup-level-old"></span>
+      <span class="levelup-arrow">↓</span>
+      <span id="levelup-new" class="levelup-level-new"></span>
+    </div>
+    <p id="levelup-exp" class="levelup-exp"></p>
+    <p id="levelup-subtext" class="levelup-subtext" hidden>新しい称号を獲得しました！</p>
+    <button type="button" id="btn-levelup-close" class="btn-primary btn-large">閉じる</button>
+  </div>
+</div>
 
 <div id="app">
 
@@ -65,6 +80,9 @@
       <p class="app-sub">知識を覚えて、営業現場での提案判断力を鍛えるトレーニングアプリ</p>
       <p id="best-record-text" class="best-record-text"></p>
     </header>
+
+    <!-- 現在のレベル・EXPゲージ -->
+    <div id="exp-gauge-start" class="exp-gauge-wrap"></div>
 
     <div class="user-bar">
       <span id="current-user-label" class="current-user-label"></span>
@@ -152,6 +170,9 @@
        画面2：クイズ画面
   ============================================================= -->
   <section id="screen-quiz" class="screen">
+    <!-- 現在のレベル・EXPゲージ（コンパクト表示） -->
+    <div id="exp-gauge-quiz" class="exp-gauge-wrap exp-gauge-wrap-compact"></div>
+
     <div class="progress-bar-track">
       <div id="quiz-progress-bar" class="progress-bar-fill"></div>
     </div>
@@ -225,6 +246,13 @@
     <h2 class="result-heading">結果発表</h2>
     <p id="new-record-banner" class="new-record-banner" hidden>🏆 自己ベスト更新！</p>
     <p id="result-message" class="result-message"></p>
+
+    <!-- 今回獲得したEXP・レベルゲージ（結果画面でまとめて反映・アニメーション表示） -->
+    <div class="card">
+      <h3 class="card-title">経験値</h3>
+      <p id="result-exp-gained" class="result-exp-gained"></p>
+      <div id="exp-gauge-result" class="exp-gauge-wrap"></div>
+    </div>
 
     <div class="card result-summary">
       <div class="result-stat">
@@ -302,6 +330,6 @@
 
 </div>
 
-<script src="script.js?v=14"></script>
+<script src="script.js?v=15"></script>
 </body>
 </html>
