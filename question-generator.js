@@ -27,7 +27,7 @@ const SPREADSHEET_ID = "13746scYc9hBgqWgvCyXuCS9olrbaxWqsIvDpLiwjtBw";
 //           新ジャンルを追加する場合は、そのtype用の問題生成関数を
 //           パート3/4に追加し、sync-questions.js内で分岐させてください。
 const SHEET_CONFIG = [
-  { name: "蓄電池メーカー比較", sheet: "", type: "battery" }
+  { name: "蓄電池メーカー比較", sheet: "再リサーチ", type: "battery" }
 ];
 
 // スプレッドシートの列名 → アプリ内部のキー名 の対応表。
