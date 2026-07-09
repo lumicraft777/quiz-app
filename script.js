@@ -412,98 +412,136 @@ function showBadgeUnlockQueue(badges) {
 }
 
 // ---- デイリーミッション表示 ----
+// 1件分のミッション行DOMを組み立てる（一覧全体用・達成済みのみの一覧用の両方で使う）
+function buildMissionItemEl(m) {
+  const item = document.createElement("div");
+  item.className = "mission-item" + (m.completed ? " completed" : "");
+
+  const main = document.createElement("div");
+  main.className = "mission-item-main";
+
+  const header = document.createElement("div");
+  header.className = "mission-item-header";
+  const title = document.createElement("span");
+  title.className = "mission-item-title";
+  title.textContent = m.title;
+  const reward = document.createElement("span");
+  reward.className = "mission-item-reward";
+  reward.textContent = `+${m.reward_exp} EXP`;
+  header.appendChild(title);
+  header.appendChild(reward);
+
+  const track = document.createElement("div");
+  track.className = "mission-progress-track";
+  const fill = document.createElement("div");
+  fill.className = "mission-progress-fill";
+  fill.style.width = `${Math.min(100, Math.round((m.progress / m.target_count) * 100))}%`;
+  track.appendChild(fill);
+
+  main.appendChild(header);
+  main.appendChild(track);
+  item.appendChild(main);
+
+  if (m.claimed) {
+    const doneLabel = document.createElement("span");
+    doneLabel.className = "mission-claimed-label";
+    doneLabel.textContent = "受取済";
+    item.appendChild(doneLabel);
+  } else if (m.completed) {
+    const claimBtn = document.createElement("button");
+    claimBtn.type = "button";
+    claimBtn.className = "mission-claim-btn";
+    claimBtn.textContent = "受け取る";
+    claimBtn.dataset.missionKey = m.key;
+    item.appendChild(claimBtn);
+  } else {
+    const countLabel = document.createElement("span");
+    countLabel.className = "mission-item-count";
+    countLabel.textContent = `${m.progress}/${m.target_count}`;
+    item.appendChild(countLabel);
+  }
+
+  return item;
+}
+
+// 今日のミッションは、スマホでログイン直後すぐに任務選択・開始まで
+// 進めるよう、デフォルトは1行サマリーのみの折りたたみ表示にしている
+// （タップで展開）。加えて、達成済み（未受取含む）のミッションだけを
+// 称号カードのすぐ上にも表示し、報酬の受け取り漏れに気づきやすくする。
 function renderDailyMissions(missions) {
   const card = document.getElementById("daily-missions-card");
   const list = document.getElementById("daily-missions-list");
+  const summaryText = document.getElementById("mission-summary-text");
+  const achievedCard = document.getElementById("achieved-missions-card");
+  const achievedList = document.getElementById("achieved-missions-list");
   if (!card || !list) return;
   list.innerHTML = "";
 
+  const completedCount = missions.filter((m) => m.completed).length;
+  summaryText.textContent = `今日のミッション（${completedCount} / ${missions.length}達成）`;
+
   missions.forEach((m) => {
-    const item = document.createElement("div");
-    item.className = "mission-item" + (m.completed ? " completed" : "");
-
-    const header = document.createElement("div");
-    header.className = "mission-item-header";
-    const title = document.createElement("span");
-    title.className = "mission-item-title";
-    title.textContent = m.title;
-    const reward = document.createElement("span");
-    reward.className = "mission-item-reward";
-    reward.textContent = `+${m.reward_exp} EXP`;
-    header.appendChild(title);
-    header.appendChild(reward);
-
-    const desc = document.createElement("p");
-    desc.className = "mission-item-desc";
-    desc.textContent = m.description;
-
-    const track = document.createElement("div");
-    track.className = "mission-progress-track";
-    const fill = document.createElement("div");
-    fill.className = "mission-progress-fill";
-    fill.style.width = `${Math.min(100, Math.round((m.progress / m.target_count) * 100))}%`;
-    track.appendChild(fill);
-
-    const footer = document.createElement("div");
-    footer.className = "mission-item-footer";
-    const progressText = document.createElement("span");
-    progressText.textContent = `${m.progress} / ${m.target_count}`;
-    footer.appendChild(progressText);
-
-    if (m.claimed) {
-      const doneLabel = document.createElement("span");
-      doneLabel.className = "mission-claimed-label";
-      doneLabel.textContent = "受け取り済み";
-      footer.appendChild(doneLabel);
-    } else if (m.completed) {
-      const claimBtn = document.createElement("button");
-      claimBtn.type = "button";
-      claimBtn.className = "mission-claim-btn";
-      claimBtn.textContent = "報酬を受け取る";
-      claimBtn.dataset.missionKey = m.key;
-      footer.appendChild(claimBtn);
-    }
-
-    item.appendChild(header);
-    item.appendChild(desc);
-    item.appendChild(track);
-    item.appendChild(footer);
-    list.appendChild(item);
+    list.appendChild(buildMissionItemEl(m));
   });
-
   card.hidden = missions.length === 0;
+
+  if (achievedCard && achievedList) {
+    achievedList.innerHTML = "";
+    const achieved = missions.filter((m) => m.completed);
+    achieved.forEach((m) => {
+      achievedList.appendChild(buildMissionItemEl(m));
+    });
+    achievedCard.hidden = achieved.length === 0;
+  }
 }
 
-// ミッションカードのクリックはリスト全体に1つだけイベント委譲で登録する
+// ミッションカードの折りたたみ・展開トグル
+function setupMissionsToggle() {
+  const toggleBtn = document.getElementById("btn-missions-toggle");
+  const card = document.getElementById("daily-missions-card");
+  const list = document.getElementById("daily-missions-list");
+  if (!toggleBtn || !card || !list) return;
+  toggleBtn.addEventListener("click", () => {
+    const expanded = card.classList.toggle("expanded");
+    list.hidden = !expanded;
+  });
+}
+
+// ミッション報酬受け取りのクリック処理（一覧全体用・達成済みのみの一覧用、
+// どちらのリストで押されても同じロジックで処理する）
+async function handleMissionClaimClick(e) {
+  const btn = e.target.closest(".mission-claim-btn");
+  if (!btn || !currentUserRecord) return;
+  btn.disabled = true;
+  try {
+    const result = await claimDailyMission(currentUserRecord.id, btn.dataset.missionKey);
+    currentUserRecord.level = result.new_level;
+    currentUserRecord.exp = result.exp;
+    currentUserRecord.totalExp = result.total_exp;
+    refreshAllExpGauges();
+    const missions = await fetchDailyMissions(currentUserRecord.id);
+    renderDailyMissions(missions);
+    if (result.new_level > result.old_level) {
+      showLevelUpOverlay(
+        result.old_level, result.new_level,
+        getLevelTitle(result.old_level), getLevelTitle(result.new_level),
+        getLevelTitle(result.old_level) !== getLevelTitle(result.new_level),
+        result.reward_exp
+      );
+    }
+  } catch (err) {
+    console.error("ミッション報酬の受け取りに失敗しました:", err.message);
+    btn.disabled = false;
+  }
+}
+
+// ミッションカードのクリックはリストごとに1つだけイベント委譲で登録する
 // （ミッション一覧はログイン・任務完了のたびに再描画されるため）
 function setupDailyMissionsClickHandler() {
   const list = document.getElementById("daily-missions-list");
-  if (!list) return;
-  list.addEventListener("click", async (e) => {
-    const btn = e.target.closest(".mission-claim-btn");
-    if (!btn || !currentUserRecord) return;
-    btn.disabled = true;
-    try {
-      const result = await claimDailyMission(currentUserRecord.id, btn.dataset.missionKey);
-      currentUserRecord.level = result.new_level;
-      currentUserRecord.exp = result.exp;
-      currentUserRecord.totalExp = result.total_exp;
-      refreshAllExpGauges();
-      const missions = await fetchDailyMissions(currentUserRecord.id);
-      renderDailyMissions(missions);
-      if (result.new_level > result.old_level) {
-        showLevelUpOverlay(
-          result.old_level, result.new_level,
-          getLevelTitle(result.old_level), getLevelTitle(result.new_level),
-          getLevelTitle(result.old_level) !== getLevelTitle(result.new_level),
-          result.reward_exp
-        );
-      }
-    } catch (err) {
-      console.error("ミッション報酬の受け取りに失敗しました:", err.message);
-      btn.disabled = false;
-    }
-  });
+  const achievedList = document.getElementById("achieved-missions-list");
+  if (list) list.addEventListener("click", handleMissionClaimClick);
+  if (achievedList) achievedList.addEventListener("click", handleMissionClaimClick);
 }
 
 
@@ -968,6 +1006,7 @@ async function initApp() {
   setupStartScreen();
   setupDictionary();
   setupDailyMissionsClickHandler();
+  setupMissionsToggle();
   setupRankingTabs();
   showScreen("screen-user");
   loadGlossary(); // 用語集はクイズ体験をブロックしないよう並行して読み込む
@@ -1016,15 +1055,26 @@ async function startAsUser(rawName, rawPin) {
   const startBtn = document.getElementById("btn-user-start");
   const connectingOverlay = document.getElementById("dive-connecting-overlay");
   const connectingText = document.getElementById("dive-connecting-text");
+  const syncPlayer = document.getElementById("dive-sync-player");
   warningEl.textContent = "";
   startBtn.disabled = true;
+
+  syncPlayer.textContent = trimmedName;
   connectingText.textContent = "仮想訓練空間へ接続中...";
   connectingOverlay.hidden = false;
   void connectingOverlay.offsetWidth;
-  connectingOverlay.classList.add("show");
+  connectingOverlay.classList.add("show", "syncing");
+
+  // 意識が仮想空間へ同期していく中間演出。最低でもこの時間は見せるが、
+  // オーバーレイをタップすればいつでもスキップできる
+  const syncDurationOrSkip = waitOrSkip(connectingOverlay, 2200);
 
   try {
-    currentUserRecord = await loginUser(trimmedName, trimmedPin);
+    const [userRecord] = await Promise.all([
+      loginUser(trimmedName, trimmedPin),
+      syncDurationOrSkip
+    ]);
+    currentUserRecord = userRecord;
     safeLocalStorageSet(LAST_USERNAME_KEY, trimmedName);
 
     document.getElementById("current-user-label").textContent = `プレイヤー：${currentUserRecord.userName}`;
@@ -1035,14 +1085,16 @@ async function startAsUser(rawName, rawPin) {
     if (state.mode) populateCategorySelect(); // 「要再挑戦リスト」「正解問題」カテゴリの有無を再評価する
     validateStartButton();
 
-    // 「接続完了」を一瞬見せてから任務端末（スタート画面）へ遷移する
+    // 中間演出（リング・ノイズ・スキャンライン）を終え、「接続完了」を
+    // 一瞬見せてから任務端末（スタート画面）へ遷移する
+    connectingOverlay.classList.remove("syncing");
     connectingText.textContent = "接続完了。任務端末を起動します。";
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await waitOrSkip(connectingOverlay, 600);
     showScreen("screen-start");
     connectingOverlay.classList.remove("show");
     setTimeout(() => { connectingOverlay.hidden = true; }, 300);
   } catch (err) {
-    connectingOverlay.classList.remove("show");
+    connectingOverlay.classList.remove("show", "syncing");
     setTimeout(() => { connectingOverlay.hidden = true; }, 300);
     warningEl.textContent =
       err.message === "ユーザー名またはPINが正しくありません"
@@ -1051,6 +1103,23 @@ async function startAsUser(rawName, rawPin) {
   } finally {
     startBtn.disabled = false;
   }
+}
+
+// 指定したミリ秒が経過するか、要素がタップ（クリック）されるまで待つ。
+// ダイブ演出の「タップでスキップ」を実現するための小さなヘルパー
+function waitOrSkip(el, ms) {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      el.removeEventListener("click", finish);
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(finish, ms);
+    el.addEventListener("click", finish);
+  });
 }
 
 // Supabaseの questions テーブルから、事前生成済みの問題を読み込む。
@@ -1948,6 +2017,10 @@ function showScreen(id) {
   // ここでscreen-userがアクティブな間だけ表示する
   const diveBg = document.getElementById("dive-bg");
   if (diveBg) diveBg.hidden = id !== "screen-user";
+  // ダイブ画面表示中は上下左右のスワイプでページ自体が動かないようにする
+  // （端末のオーバースクロール／ラバーバンドで背景の白が見えるのを防ぐ）
+  document.documentElement.classList.toggle("dive-active", id === "screen-user");
+  document.body.classList.toggle("dive-active", id === "screen-user");
 }
 
 // ---- アプリ起動 ----

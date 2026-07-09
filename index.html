@@ -7,7 +7,7 @@
 <!-- style.css / script.js を編集したら ?v= の数字を必ず増やすこと。
      増やさないと、ブラウザにキャッシュされた古いファイルが
      読み込まれ続け、コード修正がユーザーの端末に反映されないため。 -->
-<link rel="stylesheet" href="style.css?v=14">
+<link rel="stylesheet" href="style.css?v=15">
 </head>
 <body>
 
@@ -38,8 +38,18 @@
   <div class="dive-grid"></div>
   <div class="dive-scanline"></div>
 </div>
+<!-- ダイブ演出：意識が仮想空間へ同期していく中間演出。タップでスキップ可能 -->
 <div id="dive-connecting-overlay" class="dive-connecting-overlay" hidden>
-  <p id="dive-connecting-text" class="dive-connecting-text">仮想訓練空間へ接続中...</p>
+  <div class="dive-sync-noise" aria-hidden="true"></div>
+  <div class="dive-sync-scanlines" aria-hidden="true"></div>
+  <div class="dive-sync-stage">
+    <div class="dive-sync-ring dive-sync-ring-1" aria-hidden="true"></div>
+    <div class="dive-sync-ring dive-sync-ring-2" aria-hidden="true"></div>
+    <div class="dive-sync-ring dive-sync-ring-3" aria-hidden="true"></div>
+    <p id="dive-sync-player" class="dive-sync-player"></p>
+    <p id="dive-connecting-text" class="dive-connecting-text">仮想訓練空間へ接続中...</p>
+  </div>
+  <p id="dive-skip-hint" class="dive-skip-hint">タップでスキップ</p>
 </div>
 
 <!-- LEVEL UP / TITLE UPGRADE演出（結果画面でのみ表示） -->
@@ -122,17 +132,13 @@
     <!-- 連続ログイン（学習ストリーク）表示 -->
     <p id="streak-days-banner" class="streak-days-banner" hidden></p>
 
-    <!-- 今日のミッション -->
-    <div class="card" id="daily-missions-card" hidden>
-      <h2 class="card-title">今日のミッション</h2>
-      <div id="daily-missions-list" class="daily-missions-list"></div>
-    </div>
-
-    <!-- 称号（バッジ） -->
-    <div class="card" id="badges-card" hidden>
-      <h2 class="card-title">称号</h2>
-      <p id="current-title-text" class="current-title-text"></p>
-      <div id="badges-grid" class="badges-grid"></div>
+    <!-- 今日のミッション（デフォルトは折りたたみ。ログイン直後にすぐ任務選択へ進めるように） -->
+    <div class="card mission-card-compact" id="daily-missions-card" hidden>
+      <button type="button" id="btn-missions-toggle" class="mission-summary-toggle">
+        <span id="mission-summary-text" class="mission-summary-text">今日のミッション</span>
+        <span id="mission-summary-chevron" class="mission-summary-chevron">▼</span>
+      </button>
+      <div id="daily-missions-list" class="daily-missions-list" hidden></div>
     </div>
 
     <div class="card">
@@ -187,6 +193,19 @@
       <p id="data-status-text" class="status-loading">任務データを同期中…</p>
       <ul id="data-status-detail" class="data-status-detail" hidden></ul>
       <button type="button" id="btn-reload-data" class="link-btn" hidden>再同期</button>
+    </div>
+
+    <!-- 達成したミッション：称号カードのすぐ上に表示し、報酬の受け取り漏れに気づきやすくする -->
+    <div class="card" id="achieved-missions-card" hidden>
+      <h2 class="card-title">達成したミッション</h2>
+      <div id="achieved-missions-list" class="daily-missions-list"></div>
+    </div>
+
+    <!-- 称号（バッジ）：任務選択の邪魔にならないよう画面の最後に配置 -->
+    <div class="card" id="badges-card" hidden>
+      <h2 class="card-title">称号</h2>
+      <p id="current-title-text" class="current-title-text"></p>
+      <div id="badges-grid" class="badges-grid"></div>
     </div>
   </section>
 
@@ -394,6 +413,6 @@
 
 </div>
 
-<script src="script.js?v=18"></script>
+<script src="script.js?v=20"></script>
 </body>
 </html>
