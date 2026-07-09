@@ -7,7 +7,7 @@
 <!-- style.css / script.js を編集したら ?v= の数字を必ず増やすこと。
      増やさないと、ブラウザにキャッシュされた古いファイルが
      読み込まれ続け、コード修正がユーザーの端末に反映されないため。 -->
-<link rel="stylesheet" href="style.css?v=13">
+<link rel="stylesheet" href="style.css?v=14">
 </head>
 <body>
 
@@ -54,6 +54,16 @@
     <p id="levelup-exp" class="levelup-exp"></p>
     <p id="levelup-subtext" class="levelup-subtext" hidden>新しい称号を獲得しました！</p>
     <button type="button" id="btn-levelup-close" class="btn-primary btn-large">閉じる</button>
+  </div>
+</div>
+
+<!-- 称号（バッジ）解放演出（結果画面でのみ表示。LEVEL UPの後に続けて出す） -->
+<div id="badge-unlock-overlay" class="levelup-overlay badge-unlock-overlay" hidden>
+  <div class="levelup-card">
+    <p class="levelup-heading">🎖️ 称号解放！🎖️</p>
+    <p id="badge-unlock-title" class="badge-unlock-title"></p>
+    <p id="badge-unlock-desc" class="badge-unlock-desc"></p>
+    <button type="button" id="btn-badge-unlock-close" class="btn-primary btn-large">閉じる</button>
   </div>
 </div>
 
@@ -107,6 +117,22 @@
         <button type="button" id="btn-show-ranking" class="link-btn">攻略者ボードを見る</button>
         <button type="button" id="btn-switch-user" class="link-btn">プレイヤーを切り替える</button>
       </span>
+    </div>
+
+    <!-- 連続ログイン（学習ストリーク）表示 -->
+    <p id="streak-days-banner" class="streak-days-banner" hidden></p>
+
+    <!-- 今日のミッション -->
+    <div class="card" id="daily-missions-card" hidden>
+      <h2 class="card-title">今日のミッション</h2>
+      <div id="daily-missions-list" class="daily-missions-list"></div>
+    </div>
+
+    <!-- 称号（バッジ） -->
+    <div class="card" id="badges-card" hidden>
+      <h2 class="card-title">称号</h2>
+      <p id="current-title-text" class="current-title-text"></p>
+      <div id="badges-grid" class="badges-grid"></div>
     </div>
 
     <div class="card">
@@ -171,8 +197,17 @@
   <section id="screen-ranking" class="screen">
     <header class="app-header">
       <h1>攻略者ボード</h1>
-      <p class="app-sub">制圧率が高い順に表示しています（上位100名）</p>
+      <p id="ranking-sub" class="app-sub">制圧率が高い順に表示しています（上位100名）</p>
     </header>
+
+    <div class="ranking-tabs" id="ranking-tabs">
+      <button type="button" class="ranking-tab-btn selected" data-ranking="overall">総合</button>
+      <button type="button" class="ranking-tab-btn" data-ranking="weekly">今週</button>
+      <button type="button" class="ranking-tab-btn" data-ranking="combo">連撃</button>
+      <button type="button" class="ranking-tab-btn" data-ranking="suppression">制圧率</button>
+      <button type="button" class="ranking-tab-btn" data-ranking="missions">任務数</button>
+      <button type="button" class="ranking-tab-btn" data-ranking="review">復習</button>
+    </div>
 
     <div class="card">
       <div id="ranking-list" class="ranking-list"></div>
@@ -359,6 +394,6 @@
 
 </div>
 
-<script src="script.js?v=17"></script>
+<script src="script.js?v=18"></script>
 </body>
 </html>

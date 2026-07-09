@@ -55,6 +55,9 @@ create table if not exists users (
   level int not null default 1,
   exp int not null default 0,
   total_exp int not null default 0,
+  last_active_date date,
+  streak_days int not null default 0,
+  review_correct_count int not null default 0,
   created_at timestamptz not null default now()
 );
 
@@ -69,6 +72,7 @@ create table if not exists answer_history (
   correct boolean not null,
   mode text,
   category text,
+  is_review boolean not null default false,
   answered_at timestamptz not null default now()
 );
 create index if not exists answer_history_lookup
@@ -117,13 +121,14 @@ create or replace function rpc_login(p_username text, p_pin text)
 returns table (
   id uuid, username text, best_score int, best_rate int,
   current_streak int, best_streak int, total_answered int, total_correct int,
-  level int, exp int, total_exp int
+  level int, exp int, total_exp int, streak_days int
 )
 language plpgsql
 security definer
 as $$
 declare
   v_user users;
+  v_today date := current_date;
 begin
   if length(p_pin) < 4 then
     raise exception 'PINは4桁以上で入力してください';
@@ -132,19 +137,29 @@ begin
   select * into v_user from users u where u.username = p_username;
 
   if v_user.id is null then
-    insert into users (username, pin_hash)
-    values (p_username, crypt(p_pin, gen_salt('bf')))
+    insert into users (username, pin_hash, last_active_date, streak_days)
+    values (p_username, crypt(p_pin, gen_salt('bf')), v_today, 1)
     returning * into v_user;
   else
     if v_user.pin_hash <> crypt(p_pin, v_user.pin_hash) then
       raise exception 'ユーザー名またはPINが正しくありません';
     end if;
+
+    -- 連続ログイン日数（学習ストリーク）を計算する。同日中の複数回ログインでは増えない
+    if v_user.last_active_date is null or v_user.last_active_date < v_today - 1 then
+      v_user.streak_days := 1;
+    elsif v_user.last_active_date = v_today - 1 then
+      v_user.streak_days := v_user.streak_days + 1;
+    end if;
+
+    update users u set last_active_date = v_today, streak_days = v_user.streak_days
+    where u.id = v_user.id;
   end if;
 
   return query
     select v_user.id, v_user.username, v_user.best_score, v_user.best_rate,
            v_user.current_streak, v_user.best_streak, v_user.total_answered, v_user.total_correct,
-           v_user.level, v_user.exp, v_user.total_exp;
+           v_user.level, v_user.exp, v_user.total_exp, v_user.streak_days;
 end;
 $$;
 
@@ -153,7 +168,7 @@ $$;
 -- ================================================================
 create or replace function rpc_record_answer(
   p_user_id uuid, p_question_id text, p_correct boolean,
-  p_mode text default null, p_category text default null
+  p_mode text default null, p_category text default null, p_is_review boolean default false
 )
 returns table (
   current_streak int, best_streak int, total_answered int,
@@ -165,8 +180,8 @@ as $$
 declare
   v_new_streak int;
 begin
-  insert into answer_history (user_id, question_id, correct, mode, category)
-  values (p_user_id, p_question_id, p_correct, p_mode, p_category);
+  insert into answer_history (user_id, question_id, correct, mode, category, is_review)
+  values (p_user_id, p_question_id, p_correct, p_mode, p_category, p_is_review);
 
   select case when p_correct then u.current_streak + 1 else 0 end
   into v_new_streak
@@ -176,7 +191,8 @@ begin
     total_answered = u.total_answered + 1,
     total_correct = u.total_correct + (case when p_correct then 1 else 0 end),
     current_streak = v_new_streak,
-    best_streak = greatest(u.best_streak, v_new_streak)
+    best_streak = greatest(u.best_streak, v_new_streak),
+    review_correct_count = u.review_correct_count + (case when p_is_review and p_correct then 1 else 0 end)
   where u.id = p_user_id;
 
   return query
@@ -284,4 +300,314 @@ begin
     select v_old_level, v_level, v_exp, v_total_exp,
            (case when v_level >= 100 then null else 50 * v_level end);
 end;
+$$;
+
+-- ================================================================
+-- badges: 称号・バッジのマスタ定義
+-- ================================================================
+create table if not exists badges (
+  key text primary key,
+  title text not null,
+  description text not null,
+  sort_order int not null default 0
+);
+alter table badges enable row level security;
+drop policy if exists "badges are readable by anyone" on badges;
+create policy "badges are readable by anyone" on badges for select using (true);
+
+insert into badges (key, title, description, sort_order) values
+  ('first_correct', 'はじめの一歩', '初めて1問正解した', 1),
+  ('combo_10', '集中モード', '10問連続正解を達成した', 2),
+  ('review_master', '復習の鬼', '復習モードで5問正解した', 3),
+  ('advanced_5', '上級アドバイザー', '上級問題に5問正解した', 4),
+  ('all_rounder', 'オールラウンダー', '全エリアを1回以上プレイした', 5),
+  ('streak_7', '継続の達人', '7日間連続でログインした', 6),
+  ('perfect_clear', '完全制圧者', '正答率100%で任務を完了した', 7),
+  ('streak_3', '習慣化の入口', '3日間連続で学習した', 8),
+  ('trainee_30', '訓練兵', '累計30問以上に解答した', 9),
+  ('conqueror_100', '攻略者', '累計100問以上に解答した', 10),
+  ('combo_20', '連撃マスター', '最大20連続正解を達成した', 11),
+  ('comeback_master', '再起の達人', '苦手だった問題をすべて復習し尽くした', 12)
+on conflict (key) do nothing;
+
+-- user_badges: 誰がどのバッジを解放済みか
+create table if not exists user_badges (
+  user_id uuid not null references users(id) on delete cascade,
+  badge_key text not null references badges(key) on delete cascade,
+  unlocked_at timestamptz not null default now(),
+  primary key (user_id, badge_key)
+);
+alter table user_badges enable row level security;
+-- 直接アクセスは禁止。rpc_get_badges / rpc_check_badges 経由のみ
+
+-- ================================================================
+-- daily_missions: デイリーミッションのマスタ定義
+-- ================================================================
+create table if not exists daily_missions (
+  key text primary key,
+  title text not null,
+  description text not null,
+  mode_filter text, -- 'knowledge' | 'practice' | 'review' | null(モード問わず合計)
+  target_count int not null,
+  reward_exp int not null,
+  sort_order int not null default 0
+);
+alter table daily_missions enable row level security;
+drop policy if exists "daily_missions are readable by anyone" on daily_missions;
+create policy "daily_missions are readable by anyone" on daily_missions for select using (true);
+
+insert into daily_missions (key, title, description, mode_filter, target_count, reward_exp, sort_order) values
+  ('daily_knowledge_5', '基礎任務を5問解く', '基礎任務（知識問題）を今日中に5問解答しよう', 'knowledge', 5, 15, 1),
+  ('daily_practice_3', '判断任務を3問解く', '判断任務（実践提案）を今日中に3問解答しよう', 'practice', 3, 15, 2),
+  ('daily_review_3', '要再挑戦リストに3問挑む', '要再挑戦リストの問題を復習モードで3問解答しよう', 'review', 3, 20, 3),
+  ('daily_total_10', '今日の任務で10問解答する', '任務の種類を問わず、今日中に合計10問解答しよう', null, 10, 20, 4)
+on conflict (key) do nothing;
+
+-- 「報酬を受け取り済みか」だけを記録する（進捗自体はanswer_historyから毎回計算する）
+create table if not exists user_daily_mission_claims (
+  user_id uuid not null references users(id) on delete cascade,
+  mission_key text not null references daily_missions(key) on delete cascade,
+  mission_date date not null,
+  claimed_at timestamptz not null default now(),
+  primary key (user_id, mission_key, mission_date)
+);
+alter table user_daily_mission_claims enable row level security;
+
+-- ================================================================
+-- 称号・バッジRPC
+-- ================================================================
+create or replace function rpc_get_badges(p_user_id uuid)
+returns table (
+  key text, title text, description text, sort_order int, unlocked boolean, unlocked_at timestamptz
+)
+language sql
+security definer
+as $$
+  select b.key, b.title, b.description, b.sort_order,
+         (ub.user_id is not null) as unlocked, ub.unlocked_at
+  from badges b
+  left join user_badges ub on ub.badge_key = b.key and ub.user_id = p_user_id
+  order by b.sort_order;
+$$;
+
+-- 現在の永続データ（users/answer_history/questions）だけを根拠に判定し、
+-- 新たに条件を満たしたバッジだけを付与して返す（クライアントの自己申告は信用しない）
+create or replace function rpc_check_badges(p_user_id uuid)
+returns table (key text, title text, description text)
+language plpgsql
+security definer
+as $$
+declare
+  v_user users;
+  v_categories_played int;
+  v_categories_total int;
+  v_ever_wrong int;
+  v_currently_wrong int;
+  v_advanced_correct int;
+begin
+  select * into v_user from users u where u.id = p_user_id;
+  if v_user.id is null then return; end if;
+
+  select count(distinct category) into v_categories_played from answer_history where user_id = p_user_id;
+  select count(distinct category) into v_categories_total from questions;
+  select count(*) into v_ever_wrong from answer_history where user_id = p_user_id and correct = false;
+  select count(*) into v_currently_wrong from (
+    select distinct on (question_id) question_id, correct
+    from answer_history where user_id = p_user_id
+    order by question_id, answered_at desc
+  ) latest where latest.correct = false;
+  select count(*) into v_advanced_correct
+  from answer_history ah join questions q on q.id = ah.question_id
+  where ah.user_id = p_user_id and ah.correct and q.difficulty = '上級';
+
+  return query
+  with newly_inserted as (
+    insert into user_badges (user_id, badge_key)
+    select p_user_id, k from (values
+      ('first_correct', v_user.total_correct >= 1),
+      ('combo_10', v_user.best_streak >= 10),
+      ('review_master', v_user.review_correct_count >= 5),
+      ('advanced_5', v_advanced_correct >= 5),
+      ('all_rounder', v_categories_total > 0 and v_categories_played >= v_categories_total),
+      ('streak_7', v_user.streak_days >= 7),
+      ('perfect_clear', v_user.best_rate = 100),
+      ('streak_3', v_user.streak_days >= 3),
+      ('trainee_30', v_user.total_answered >= 30),
+      ('conqueror_100', v_user.total_answered >= 100),
+      ('combo_20', v_user.best_streak >= 20),
+      ('comeback_master', v_ever_wrong > 0 and v_currently_wrong = 0)
+    ) as conds(k, ok)
+    where ok
+    on conflict (user_id, badge_key) do nothing
+    returning badge_key
+  )
+  select b.key, b.title, b.description
+  from newly_inserted ni
+  join badges b on b.key = ni.badge_key;
+end;
+$$;
+
+-- ================================================================
+-- デイリーミッションRPC
+-- ================================================================
+create or replace function rpc_get_daily_missions(p_user_id uuid)
+returns table (
+  key text, title text, description text, target_count int, reward_exp int,
+  progress int, completed boolean, claimed boolean
+)
+language sql
+security definer
+as $$
+  select
+    dm.key, dm.title, dm.description, dm.target_count, dm.reward_exp,
+    least(coalesce(cnt.n, 0), dm.target_count) as progress,
+    coalesce(cnt.n, 0) >= dm.target_count as completed,
+    (c.user_id is not null) as claimed
+  from daily_missions dm
+  left join lateral (
+    select count(*) as n
+    from answer_history ah
+    where ah.user_id = p_user_id
+      and ah.answered_at::date = current_date
+      and (dm.mode_filter is null or
+           (dm.mode_filter = 'review' and ah.is_review) or
+           (dm.mode_filter <> 'review' and ah.mode = dm.mode_filter))
+  ) cnt on true
+  left join user_daily_mission_claims c
+    on c.user_id = p_user_id and c.mission_key = dm.key and c.mission_date = current_date
+  order by dm.sort_order;
+$$;
+
+create or replace function rpc_claim_daily_mission(p_user_id uuid, p_mission_key text)
+returns table (
+  old_level int, new_level int, exp int, total_exp int, next_required_exp int, reward_exp int
+)
+language plpgsql
+security definer
+as $$
+declare
+  v_target int;
+  v_reward int;
+  v_progress int;
+  v_already_claimed boolean;
+  v_old_level int; v_level int; v_exp int; v_total_exp int; v_required int;
+begin
+  select dm.target_count, dm.reward_exp into v_target, v_reward
+  from daily_missions dm where dm.key = p_mission_key;
+  if v_target is null then
+    raise exception 'ミッションが見つかりません';
+  end if;
+
+  select exists(
+    select 1 from user_daily_mission_claims
+    where user_id = p_user_id and mission_key = p_mission_key and mission_date = current_date
+  ) into v_already_claimed;
+  if v_already_claimed then
+    raise exception 'このミッションは既に受け取り済みです';
+  end if;
+
+  select count(*) into v_progress
+  from answer_history ah, daily_missions dm
+  where dm.key = p_mission_key
+    and ah.user_id = p_user_id
+    and ah.answered_at::date = current_date
+    and (dm.mode_filter is null or
+         (dm.mode_filter = 'review' and ah.is_review) or
+         (dm.mode_filter <> 'review' and ah.mode = dm.mode_filter));
+
+  if v_progress < v_target then
+    raise exception 'ミッションの達成条件を満たしていません';
+  end if;
+
+  insert into user_daily_mission_claims (user_id, mission_key, mission_date)
+  values (p_user_id, p_mission_key, current_date);
+
+  select u.level, u.exp, u.total_exp into v_old_level, v_exp, v_total_exp
+  from users u where u.id = p_user_id;
+
+  v_level := v_old_level;
+  v_total_exp := v_total_exp + v_reward;
+  v_exp := v_exp + v_reward;
+  while v_level < 100 loop
+    v_required := 50 * v_level;
+    exit when v_exp < v_required;
+    v_exp := v_exp - v_required;
+    v_level := v_level + 1;
+  end loop;
+  if v_level >= 100 then v_level := 100; end if;
+
+  update users u set level = v_level, exp = v_exp, total_exp = v_total_exp
+  where u.id = p_user_id;
+
+  return query select v_old_level, v_level, v_exp, v_total_exp,
+    (case when v_level >= 100 then null else 50 * v_level end), v_reward;
+end;
+$$;
+
+-- ================================================================
+-- 複数ランキングRPC（既存のrpc_get_ranking＝総合攻略者ボードは変更しない）
+-- ================================================================
+create or replace function rpc_get_weekly_ranking()
+returns table (username text, weekly_correct int, weekly_answered int, level int, total_exp int)
+language sql
+security definer
+as $$
+  select u.username,
+         count(*) filter (where ah.correct)::int as weekly_correct,
+         count(*)::int as weekly_answered,
+         u.level, u.total_exp
+  from answer_history ah
+  join users u on u.id = ah.user_id
+  where ah.answered_at >= now() - interval '7 days'
+  group by u.id, u.username, u.level, u.total_exp
+  order by weekly_correct desc, weekly_answered desc
+  limit 100;
+$$;
+
+create or replace function rpc_get_combo_ranking()
+returns table (username text, best_streak int, level int, total_exp int)
+language sql
+security definer
+as $$
+  select username, best_streak, level, total_exp
+  from users
+  where best_streak > 0
+  order by best_streak desc
+  limit 100;
+$$;
+
+create or replace function rpc_get_suppression_ranking()
+returns table (username text, best_rate int, level int, total_exp int)
+language sql
+security definer
+as $$
+  select username, best_rate, level, total_exp
+  from users
+  where total_answered > 0
+  order by best_rate desc, username asc
+  limit 100;
+$$;
+
+create or replace function rpc_get_mission_count_ranking()
+returns table (username text, total_answered int, level int, total_exp int)
+language sql
+security definer
+as $$
+  select username, total_answered, level, total_exp
+  from users
+  where total_answered > 0
+  order by total_answered desc
+  limit 100;
+$$;
+
+create or replace function rpc_get_review_ranking()
+returns table (username text, review_correct_count int, level int, total_exp int)
+language sql
+security definer
+as $$
+  select username, review_correct_count, level, total_exp
+  from users
+  where review_correct_count > 0
+  order by review_correct_count desc
+  limit 100;
 $$;

@@ -753,6 +753,188 @@ body {
   margin: 0 0 18px;
 }
 
+/* 称号（バッジ）解放演出は.levelup-overlayの見た目を流用しつつ、
+   見出しの色だけ変えて「レベルアップ」と区別がつくようにする */
+.badge-unlock-overlay .levelup-heading {
+  color: #b8860b;
+}
+.badge-unlock-title {
+  font-size: 1.5rem;
+  font-weight: bold;
+  color: var(--color-primary-dark);
+  margin: 0 0 8px;
+}
+.badge-unlock-desc {
+  font-size: 0.95rem;
+  color: var(--color-muted);
+  margin: 0 0 18px;
+}
+
+/* ============================================================
+   連続ログイン（学習ストリーク）バナー
+   ============================================================= */
+.streak-days-banner {
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: #fff6ef;
+  border: 1px solid #ffd8b8;
+  color: var(--color-accent);
+  font-size: 0.85rem;
+  font-weight: bold;
+  text-align: center;
+}
+
+/* ============================================================
+   今日のミッション
+   ============================================================= */
+.daily-missions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.mission-item {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #f9fbfa;
+  border: 2px solid var(--color-border);
+}
+.mission-item.completed {
+  border-color: var(--color-primary);
+  background: #f0f8f4;
+}
+.mission-item-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.mission-item-title {
+  font-weight: bold;
+  font-size: 0.92rem;
+}
+.mission-item-reward {
+  font-size: 0.78rem;
+  color: var(--color-accent);
+  font-weight: bold;
+  white-space: nowrap;
+}
+.mission-item-desc {
+  margin: 4px 0 8px;
+  font-size: 0.78rem;
+  color: var(--color-muted);
+}
+.mission-progress-track {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--color-border);
+  overflow: hidden;
+}
+.mission-progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--color-primary);
+  transition: width 0.5s ease;
+}
+.mission-item-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 6px;
+  font-size: 0.78rem;
+  color: var(--color-muted);
+}
+.mission-claimed-label {
+  color: var(--color-primary);
+  font-weight: bold;
+}
+.mission-claim-btn {
+  border: none;
+  border-radius: 999px;
+  padding: 6px 14px;
+  background: var(--color-accent);
+  color: #fff;
+  font-size: 0.78rem;
+  font-weight: bold;
+  cursor: pointer;
+}
+.mission-claim-btn:active {
+  transform: scale(0.96);
+}
+.mission-claim-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* ============================================================
+   称号（バッジ）
+   ============================================================= */
+.current-title-text {
+  margin: 0 0 10px;
+  font-size: 0.82rem;
+  color: var(--color-muted);
+}
+.badges-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 8px;
+}
+.badge-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 2px;
+  padding: 10px 8px;
+  border-radius: 10px;
+  border: 2px solid var(--color-border);
+  background: #f9fbfa;
+}
+.badge-item.unlocked {
+  border-color: #e8c25a;
+  background: #fffaf0;
+}
+.badge-item.locked {
+  opacity: 0.55;
+}
+.badge-item-icon {
+  font-size: 1.4rem;
+}
+.badge-item-title {
+  font-size: 0.78rem;
+  font-weight: bold;
+}
+.badge-item-desc {
+  font-size: 0.68rem;
+  color: var(--color-muted);
+}
+
+/* ============================================================
+   攻略者ボードのタブ切り替え
+   ============================================================= */
+.ranking-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: center;
+  margin: 0 0 14px;
+}
+.ranking-tab-btn {
+  border: 2px solid var(--color-border);
+  border-radius: 999px;
+  padding: 6px 12px;
+  background: var(--color-card);
+  color: var(--color-text);
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+.ranking-tab-btn.selected {
+  border-color: var(--color-primary);
+  background: var(--color-primary);
+  color: #fff;
+  font-weight: bold;
+}
+
 /* ============================================================
    データ読み込み状況の表示（クイズ開始ボタンの下に、控えめに表示）
    ============================================================= */

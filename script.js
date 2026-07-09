@@ -326,6 +326,186 @@ function refreshAllExpGauges() {
   });
 }
 
+// ---- 連続ログイン（学習ストリーク）表示 ----
+function renderStreakBanner() {
+  const el = document.getElementById("streak-days-banner");
+  if (!el || !currentUserRecord) return;
+  const days = currentUserRecord.streakDays || 0;
+  if (days >= 2) {
+    el.textContent = `🔥 ${days}日連続ログイン中！今日も任務を開始してストリークを継続しよう`;
+    el.hidden = false;
+  } else {
+    el.hidden = true;
+  }
+}
+
+// ---- 称号（バッジ）表示 ----
+function renderBadges(badges) {
+  const card = document.getElementById("badges-card");
+  const grid = document.getElementById("badges-grid");
+  const titleText = document.getElementById("current-title-text");
+  if (!card || !grid) return;
+  grid.innerHTML = "";
+
+  const unlocked = badges.filter((b) => b.unlocked);
+  titleText.textContent = unlocked.length > 0
+    ? `解放済み：${unlocked.length} / ${badges.length}`
+    : `まだ称号がありません。任務を攻略して解放しよう`;
+
+  badges.forEach((b) => {
+    const item = document.createElement("div");
+    item.className = "badge-item" + (b.unlocked ? " unlocked" : " locked");
+    const icon = document.createElement("span");
+    icon.className = "badge-item-icon";
+    icon.textContent = b.unlocked ? "🎖️" : "🔒";
+    const title = document.createElement("span");
+    title.className = "badge-item-title";
+    title.textContent = b.title;
+    const desc = document.createElement("span");
+    desc.className = "badge-item-desc";
+    desc.textContent = b.description;
+    item.appendChild(icon);
+    item.appendChild(title);
+    item.appendChild(desc);
+    grid.appendChild(item);
+  });
+
+  card.hidden = badges.length === 0;
+}
+
+// onClosed：閉じるボタンが押された後（フェードアウト完了後）に呼ばれるコールバック
+function showBadgeUnlockOverlay(badge, onClosed) {
+  const overlay = document.getElementById("badge-unlock-overlay");
+  if (!overlay) return;
+  document.getElementById("badge-unlock-title").textContent = badge.title;
+  document.getElementById("badge-unlock-desc").textContent = badge.description;
+
+  overlay.hidden = false;
+  void overlay.offsetWidth;
+  overlay.classList.add("show");
+  playLevelUpSound(false);
+  launchConfetti(70);
+
+  const closeBtn = document.getElementById("btn-badge-unlock-close");
+  const close = () => {
+    overlay.classList.remove("show");
+    closeBtn.removeEventListener("click", close);
+    setTimeout(() => {
+      overlay.hidden = true;
+      if (onClosed) onClosed();
+    }, 300);
+  };
+  closeBtn.addEventListener("click", close);
+}
+
+// 複数の称号が同時に解放された場合、1つずつ順番に見せる
+function showBadgeUnlockQueue(badges) {
+  if (!badges || badges.length === 0) return;
+  let i = 0;
+  const showNext = () => {
+    if (i >= badges.length) return;
+    const badge = badges[i];
+    i++;
+    showBadgeUnlockOverlay(badge, showNext);
+  };
+  showNext();
+}
+
+// ---- デイリーミッション表示 ----
+function renderDailyMissions(missions) {
+  const card = document.getElementById("daily-missions-card");
+  const list = document.getElementById("daily-missions-list");
+  if (!card || !list) return;
+  list.innerHTML = "";
+
+  missions.forEach((m) => {
+    const item = document.createElement("div");
+    item.className = "mission-item" + (m.completed ? " completed" : "");
+
+    const header = document.createElement("div");
+    header.className = "mission-item-header";
+    const title = document.createElement("span");
+    title.className = "mission-item-title";
+    title.textContent = m.title;
+    const reward = document.createElement("span");
+    reward.className = "mission-item-reward";
+    reward.textContent = `+${m.reward_exp} EXP`;
+    header.appendChild(title);
+    header.appendChild(reward);
+
+    const desc = document.createElement("p");
+    desc.className = "mission-item-desc";
+    desc.textContent = m.description;
+
+    const track = document.createElement("div");
+    track.className = "mission-progress-track";
+    const fill = document.createElement("div");
+    fill.className = "mission-progress-fill";
+    fill.style.width = `${Math.min(100, Math.round((m.progress / m.target_count) * 100))}%`;
+    track.appendChild(fill);
+
+    const footer = document.createElement("div");
+    footer.className = "mission-item-footer";
+    const progressText = document.createElement("span");
+    progressText.textContent = `${m.progress} / ${m.target_count}`;
+    footer.appendChild(progressText);
+
+    if (m.claimed) {
+      const doneLabel = document.createElement("span");
+      doneLabel.className = "mission-claimed-label";
+      doneLabel.textContent = "受け取り済み";
+      footer.appendChild(doneLabel);
+    } else if (m.completed) {
+      const claimBtn = document.createElement("button");
+      claimBtn.type = "button";
+      claimBtn.className = "mission-claim-btn";
+      claimBtn.textContent = "報酬を受け取る";
+      claimBtn.dataset.missionKey = m.key;
+      footer.appendChild(claimBtn);
+    }
+
+    item.appendChild(header);
+    item.appendChild(desc);
+    item.appendChild(track);
+    item.appendChild(footer);
+    list.appendChild(item);
+  });
+
+  card.hidden = missions.length === 0;
+}
+
+// ミッションカードのクリックはリスト全体に1つだけイベント委譲で登録する
+// （ミッション一覧はログイン・任務完了のたびに再描画されるため）
+function setupDailyMissionsClickHandler() {
+  const list = document.getElementById("daily-missions-list");
+  if (!list) return;
+  list.addEventListener("click", async (e) => {
+    const btn = e.target.closest(".mission-claim-btn");
+    if (!btn || !currentUserRecord) return;
+    btn.disabled = true;
+    try {
+      const result = await claimDailyMission(currentUserRecord.id, btn.dataset.missionKey);
+      currentUserRecord.level = result.new_level;
+      currentUserRecord.exp = result.exp;
+      currentUserRecord.totalExp = result.total_exp;
+      refreshAllExpGauges();
+      const missions = await fetchDailyMissions(currentUserRecord.id);
+      renderDailyMissions(missions);
+      if (result.new_level > result.old_level) {
+        showLevelUpOverlay(
+          result.old_level, result.new_level,
+          getLevelTitle(result.old_level), getLevelTitle(result.new_level),
+          getLevelTitle(result.old_level) !== getLevelTitle(result.new_level),
+          result.reward_exp
+        );
+      }
+    } catch (err) {
+      console.error("ミッション報酬の受け取りに失敗しました:", err.message);
+      btn.disabled = false;
+    }
+  });
+}
+
 
 /* ================================================================
    [パート2] 画面制御・クイズ進行ロジック（アプリ本体）
@@ -439,6 +619,7 @@ async function loginUser(username, pin) {
     level: row.level,
     exp: row.exp,
     totalExp: row.total_exp,
+    streakDays: row.streak_days,
     wrongQuestionIds: statusRows.filter((r) => !r.correct).map((r) => r.question_id),
     correctQuestionIds: statusRows.filter((r) => r.correct).map((r) => r.question_id)
   };
@@ -466,7 +647,8 @@ async function recordAnswerForUser(question, isCorrect) {
       p_question_id: question.id,
       p_correct: isCorrect,
       p_mode: question.mode,
-      p_category: question.category
+      p_category: question.category,
+      p_is_review: state.isReviewSession
     });
     const row = rows[0];
     record.currentStreak = row.current_streak;
@@ -500,6 +682,41 @@ async function recordSessionResultForUser(userId, correctCount, rate) {
 // ランキング（全ユーザー横断）を取得する
 async function fetchRanking() {
   return supabaseRpc("rpc_get_ranking", {});
+}
+
+// 攻略者ボードの種類ごとに異なるRPCを呼ぶ（総合以外は既存のソートロジックには一切触れない）
+const RANKING_FETCHERS = {
+  overall: () => supabaseRpc("rpc_get_ranking", {}),
+  weekly: () => supabaseRpc("rpc_get_weekly_ranking", {}),
+  combo: () => supabaseRpc("rpc_get_combo_ranking", {}),
+  suppression: () => supabaseRpc("rpc_get_suppression_ranking", {}),
+  missions: () => supabaseRpc("rpc_get_mission_count_ranking", {}),
+  review: () => supabaseRpc("rpc_get_review_ranking", {})
+};
+
+// ---- 称号（バッジ） ----
+async function fetchBadges(userId) {
+  return supabaseRpc("rpc_get_badges", { p_user_id: userId });
+}
+
+// 現在の永続データだけを根拠にサーバー側で判定し、新たに解放された称号を返す
+async function checkAndGrantBadges(userId) {
+  try {
+    return await supabaseRpc("rpc_check_badges", { p_user_id: userId });
+  } catch (err) {
+    console.error("称号判定に失敗しました:", err.message);
+    return [];
+  }
+}
+
+// ---- デイリーミッション ----
+async function fetchDailyMissions(userId) {
+  return supabaseRpc("rpc_get_daily_missions", { p_user_id: userId });
+}
+
+async function claimDailyMission(userId, missionKey) {
+  const rows = await supabaseRpc("rpc_claim_daily_mission", { p_user_id: userId, p_mission_key: missionKey });
+  return rows[0];
 }
 
 
@@ -717,6 +934,23 @@ function renderBestRecordOnStart() {
   el.textContent = `🏆 ${r.userName}さんの自己ベスト：` + parts.join(" ／ ");
 }
 
+// スタート画面のストリーク・称号・デイリーミッションをまとめて再取得・再描画する
+// （ログイン時、および任務完了後のスタート画面復帰時に呼ぶ）
+async function refreshHomeExtras() {
+  if (!currentUserRecord) return;
+  renderStreakBanner();
+  try {
+    const [badges, missions] = await Promise.all([
+      fetchBadges(currentUserRecord.id),
+      fetchDailyMissions(currentUserRecord.id)
+    ]);
+    renderBadges(badges);
+    renderDailyMissions(missions);
+  } catch (err) {
+    console.error("称号・ミッション情報の取得に失敗しました:", err.message);
+  }
+}
+
 // 結果に応じた一言メッセージ
 function getResultMessage(rate) {
   if (rate === 100) return "🎉 完全制圧！ミッションを完璧に突破した。";
@@ -733,6 +967,8 @@ async function initApp() {
   setupUserScreen();
   setupStartScreen();
   setupDictionary();
+  setupDailyMissionsClickHandler();
+  setupRankingTabs();
   showScreen("screen-user");
   loadGlossary(); // 用語集はクイズ体験をブロックしないよう並行して読み込む
   await loadAllData(); // ユーザー入力中にバックグラウンドで読み込みを進めておく
@@ -794,6 +1030,7 @@ async function startAsUser(rawName, rawPin) {
     document.getElementById("current-user-label").textContent = `プレイヤー：${currentUserRecord.userName}`;
     renderBestRecordOnStart();
     refreshAllExpGauges();
+    refreshHomeExtras();
     updateDataStatusDetail();
     if (state.mode) populateCategorySelect(); // 「要再挑戦リスト」「正解問題」カテゴリの有無を再評価する
     validateStartButton();
@@ -962,6 +1199,71 @@ function setupStartScreen() {
   });
 }
 
+// 現在選択中の攻略者ボードの種類（タブ）
+let currentRankingType = "overall";
+
+const RANKING_SUBCOPY = {
+  overall: "制圧率が高い順に表示しています（上位100名）",
+  weekly: "直近7日間の正解数が多い順に表示しています（上位100名）",
+  combo: "最大コンボ数が多い順に表示しています（上位100名）",
+  suppression: "制圧率が高い順に表示しています（上位100名）",
+  missions: "累計解答数が多い順に表示しています（上位100名）",
+  review: "要再挑戦リストの復習正解数が多い順に表示しています（上位100名）"
+};
+
+function setupRankingTabs() {
+  const tabButtons = document.querySelectorAll("#ranking-tabs .ranking-tab-btn");
+  tabButtons.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      tabButtons.forEach((b) => b.classList.remove("selected"));
+      btn.classList.add("selected");
+      currentRankingType = btn.dataset.ranking;
+      document.getElementById("ranking-sub").textContent = RANKING_SUBCOPY[currentRankingType] || "";
+      renderRankingScreen();
+    });
+  });
+}
+
+// 攻略者ボードのタブごとに、表示する見出し行・詳細行の中身を組み立てる
+function buildRankingStatsLines(type, row) {
+  const levelLine = `Lv.${row.level ?? 1} ${getLevelTitle(row.level ?? 1)} ／ 累計EXP ${(row.total_exp ?? 0).toLocaleString()}`;
+  switch (type) {
+    case "weekly":
+      return {
+        headline: `今週の正解数 ${row.weekly_correct}問`,
+        detail: [`今週の解答数 ${row.weekly_answered}問`, levelLine]
+      };
+    case "combo":
+      return {
+        headline: `最大コンボ ${row.best_streak}`,
+        detail: [levelLine]
+      };
+    case "suppression":
+      return {
+        headline: `制圧率 ${row.best_rate}%`,
+        detail: [levelLine]
+      };
+    case "missions":
+      return {
+        headline: `累計解答数 ${row.total_answered}問`,
+        detail: [levelLine]
+      };
+    case "review":
+      return {
+        headline: `復習正解数 ${row.review_correct_count}問`,
+        detail: [levelLine]
+      };
+    default:
+      return {
+        headline: `正答率 ${row.best_rate}%`,
+        detail: [
+          levelLine,
+          `正答数 ${row.best_score}問 ／ コンボ ${row.current_streak}（最高${row.best_streak}） ／ 累計 ${row.total_answered}問`
+        ]
+      };
+  }
+}
+
 // ランキング画面の描画（全ユーザー横断。ユーザー名以外の個人情報は表示しない）
 async function renderRankingScreen() {
   const listEl = document.getElementById("ranking-list");
@@ -973,7 +1275,8 @@ async function renderRankingScreen() {
   errorEl.hidden = true;
 
   try {
-    const rows = await fetchRanking();
+    const fetcher = RANKING_FETCHERS[currentRankingType] || RANKING_FETCHERS.overall;
+    const rows = await fetcher();
 
     if (rows.length === 0) {
       emptyEl.hidden = false;
@@ -992,20 +1295,16 @@ async function renderRankingScreen() {
       name.className = "ranking-name";
       name.textContent = row.username;
 
+      const { headline, detail } = buildRankingStatsLines(currentRankingType, row);
       const stats = document.createElement("span");
       stats.className = "ranking-stats";
       const bEl = document.createElement("b");
-      bEl.textContent = `正答率 ${row.best_rate}%`;
+      bEl.textContent = headline;
       stats.appendChild(bEl);
-      stats.appendChild(document.createElement("br"));
-      // レベル・称号（既存の正答率順ランキングのロジックには手を加えていない。表示を追加するだけ）
-      stats.appendChild(document.createTextNode(
-        `Lv.${row.level ?? 1} ${getLevelTitle(row.level ?? 1)} ／ 累計EXP ${(row.total_exp ?? 0).toLocaleString()}`
-      ));
-      stats.appendChild(document.createElement("br"));
-      stats.appendChild(document.createTextNode(
-        `正答数 ${row.best_score}問 ／ コンボ ${row.current_streak}（最高${row.best_streak}） ／ 累計 ${row.total_answered}問`
-      ));
+      detail.forEach((line) => {
+        stats.appendChild(document.createElement("br"));
+        stats.appendChild(document.createTextNode(line));
+      });
 
       item.appendChild(rank);
       item.appendChild(name);
@@ -1491,7 +1790,8 @@ async function renderResultScreen() {
       currentUserRecord.bestRate = rate;
       isNewRecord = true;
     }
-    recordSessionResultForUser(currentUserRecord.id, correctCount, rate);
+    // 称号判定がサーバー側の最新値（best_rate等）を参照するため、ここはawaitする
+    await recordSessionResultForUser(currentUserRecord.id, correctCount, rate);
   }
   document.getElementById("new-record-banner").hidden = !isNewRecord;
 
@@ -1530,6 +1830,14 @@ async function renderResultScreen() {
         console.error("EXP反映に失敗しました:", err.message);
       }
     }
+
+    // 称号（バッジ）の自動判定。EXP反映・自己ベスト保存が終わった後の
+    // 最新の永続データ（サーバー側の値）だけを根拠に判定する
+    const newBadges = await checkAndGrantBadges(currentUserRecord.id);
+    if (newBadges.length > 0) {
+      setTimeout(() => showBadgeUnlockQueue(newBadges), 2000);
+    }
+    refreshHomeExtras(); // 次にスタート画面へ戻ったときのため、称号・ミッション表示を更新しておく
   }
 
   // 高得点・自己ベスト更新時は紙吹雪でお祝いする
@@ -1625,6 +1933,7 @@ function resetToStart() {
   document.getElementById("start-warning").textContent = "";
   renderBestRecordOnStart();
   refreshAllExpGauges();
+  refreshHomeExtras();
   updateDataStatusDetail();
 
   showScreen("screen-start");
