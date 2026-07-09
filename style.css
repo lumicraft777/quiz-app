@@ -184,9 +184,13 @@ body {
 #mode-select {
   grid-template-columns: 1fr;
 }
-#count-select .option-btn {
+#count-select .option-btn,
+#level-select .option-btn {
   align-items: center;
   text-align: center;
+}
+.option-grid-4 {
+  grid-template-columns: repeat(4, 1fr);
 }
 
 .select-box {
@@ -237,6 +241,12 @@ body {
   font-size: 0.85rem;
   cursor: pointer;
   padding: 4px;
+}
+.quit-early-btn {
+  display: block;
+  width: 100%;
+  text-align: center;
+  margin-top: 4px;
 }
 
 /* ============================================================
@@ -726,6 +736,10 @@ body {
 @media (max-width: 480px) {
   .option-grid {
     grid-template-columns: 1fr;
+  }
+  /* レベル選択は4択とも短い単語なので、スマホでは1列より2x2の方が見やすい */
+  .option-grid-4 {
+    grid-template-columns: 1fr 1fr;
   }
   .app-header h1 {
     font-size: 1.3rem;

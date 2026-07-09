@@ -7,7 +7,7 @@
 <!-- style.css / script.js を編集したら ?v= の数字を必ず増やすこと。
      増やさないと、ブラウザにキャッシュされた古いファイルが
      読み込まれ続け、コード修正がユーザーの端末に反映されないため。 -->
-<link rel="stylesheet" href="style.css?v=6">
+<link rel="stylesheet" href="style.css?v=7">
 </head>
 <body>
 
@@ -79,7 +79,17 @@
     </div>
 
     <div class="card">
-      <h2 class="card-title">3. 問題数を選ぶ</h2>
+      <h2 class="card-title">3. レベルを選ぶ</h2>
+      <div class="option-grid option-grid-4" id="level-select">
+        <button type="button" class="option-btn level-btn selected" data-level="全レベル">全レベル</button>
+        <button type="button" class="option-btn level-btn" data-level="初級">初級</button>
+        <button type="button" class="option-btn level-btn" data-level="中級">中級</button>
+        <button type="button" class="option-btn level-btn" data-level="上級">上級</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2 class="card-title">4. 問題数を選ぶ</h2>
       <div class="option-grid" id="count-select">
         <button type="button" class="option-btn count-btn" data-count="5">5問</button>
         <button type="button" class="option-btn count-btn" data-count="10">10問</button>
@@ -127,6 +137,7 @@
     </div>
 
     <button type="button" id="btn-answer" class="btn-primary btn-large" disabled>回答する</button>
+    <button type="button" id="btn-quit-early" class="link-btn quit-early-btn">ここで終了して結果を見る</button>
   </section>
 
   <!-- ============================================================
@@ -234,6 +245,10 @@
           <span class="record-label">不正解リスト数</span>
           <span class="record-value" id="result-wrong-count"></span>
         </div>
+        <div class="record-item">
+          <span class="record-label">正解済みリスト数</span>
+          <span class="record-value" id="result-correct-count"></span>
+        </div>
       </div>
     </div>
 
@@ -249,6 +264,6 @@
 
 </div>
 
-<script src="script.js?v=11"></script>
+<script src="script.js?v=12"></script>
 </body>
 </html>

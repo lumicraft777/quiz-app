@@ -962,14 +962,17 @@ const CATEGORY_ORDER = [
   "電気代削減", "初期費用", "EV/V2H", "保証・安心", "設置スペース", "営業トーク判断"
 ];
 
-// 「不正解問題」はカテゴリ一覧の中に混ぜて選べるようにする特別な擬似カテゴリ。
-// 実際のカテゴリタグではなく、現在のユーザーの不正解リストへのID一致で絞り込む。
+// 「不正解問題」「正解問題」はカテゴリ一覧の中に混ぜて選べるようにする特別な
+// 擬似カテゴリ。実際のカテゴリタグではなく、現在のユーザーの不正解/正解済み
+// リストへのID一致で絞り込む。
 const WRONG_CATEGORY = "不正解問題";
+const CORRECT_CATEGORY = "正解問題";
 
 // アプリの状態（グローバル管理・現在のセッションに関するものだけ）
 const state = {
   mode: null,        // "knowledge" | "practice" | "mix"
   category: "全カテゴリ",
+  level: "全レベル",  // "全レベル" | "初級" | "中級" | "上級"
   countOption: null, // "5" | "10" | "20" | "all"
   sessionQuestions: [],
   currentIndex: 0,
@@ -1038,6 +1041,7 @@ function getDefaultUserRecord(userId, userName) {
     totalAnswered: 0,
     totalCorrect: 0,
     wrongQuestionIds: [],
+    correctQuestionIds: [],
     history: []
   };
 }
@@ -1049,6 +1053,7 @@ function normalizeUserRecord(raw, userId, userName) {
   if (!raw || typeof raw !== "object") return base;
 
   const num = (v) => (typeof v === "number" && isFinite(v) ? v : 0);
+  const idList = (v) => (Array.isArray(v) ? v.filter((id) => typeof id === "string") : []);
 
   return {
     userId,
@@ -1059,9 +1064,8 @@ function normalizeUserRecord(raw, userId, userName) {
     bestStreak: num(raw.bestStreak),
     totalAnswered: num(raw.totalAnswered),
     totalCorrect: num(raw.totalCorrect),
-    wrongQuestionIds: Array.isArray(raw.wrongQuestionIds)
-      ? raw.wrongQuestionIds.filter((id) => typeof id === "string")
-      : [],
+    wrongQuestionIds: idList(raw.wrongQuestionIds),
+    correctQuestionIds: idList(raw.correctQuestionIds),
     history: Array.isArray(raw.history) ? raw.history : []
   };
 }
@@ -1083,20 +1087,33 @@ function saveUserRecord(record) {
   safeLocalStorageSet(LAST_USER_KEY, record.userId);
 }
 
+function addToListUnique(list, id) {
+  if (!list.includes(id)) list.push(id);
+}
+function removeFromList(list, id) {
+  const idx = list.indexOf(id);
+  if (idx !== -1) list.splice(idx, 1);
+}
+
 // スプレッドシートの更新等で問題IDの構成が変わっても、
-// 存在しない問題IDが不正解リストに残ってエラーの原因にならないようにする
+// 存在しない問題IDが不正解/正解済みリストに残ってエラーの原因にならないようにする
 function pruneWrongQuestionIds(record) {
   if (!record) return;
   const validIds = new Set(knowledgeQuestions.concat(practiceQuestions).map((q) => q.id));
-  const before = record.wrongQuestionIds.length;
+  const beforeWrong = record.wrongQuestionIds.length;
+  const beforeCorrect = record.correctQuestionIds.length;
   record.wrongQuestionIds = record.wrongQuestionIds.filter((id) => validIds.has(id));
-  if (record.wrongQuestionIds.length !== before) saveUserRecord(record);
+  record.correctQuestionIds = record.correctQuestionIds.filter((id) => validIds.has(id));
+  if (record.wrongQuestionIds.length !== beforeWrong || record.correctQuestionIds.length !== beforeCorrect) {
+    saveUserRecord(record);
+  }
 }
 
-// 1問回答するたびに呼ぶ：不正解リストの追加/削除・連続正解数・累計を更新する
-// （通常モードでも「不正解問題」復習モードでも、ルールは共通）
-//   ・正解 → 不正解リストから削除（無ければ何もしない）、連続正解+1
-//   ・不正解 → 不正解リストに追加（重複しない）、連続正解は0にリセット
+// 1問回答するたびに呼ぶ：不正解/正解済みリストの追加・削除、連続正解数・累計を更新する
+// （通常モードでも「不正解問題」「正解問題」復習モードでも、ルールは共通）。
+// 各問題は常に「直近の回答結果」だけを反映するよう、2つのリストは排他的にする。
+//   ・正解 → 不正解リストから削除、正解済みリストに追加、連続正解+1
+//   ・不正解 → 正解済みリストから削除、不正解リストに追加、連続正解は0にリセット
 function recordAnswerForUser(question, isCorrect) {
   if (!currentUserRecord) return;
   const record = currentUserRecord;
@@ -1110,13 +1127,12 @@ function recordAnswerForUser(question, isCorrect) {
       record.bestStreak = record.currentStreak;
       newStreakRecordThisSession = true;
     }
-    const idx = record.wrongQuestionIds.indexOf(question.id);
-    if (idx !== -1) record.wrongQuestionIds.splice(idx, 1);
+    removeFromList(record.wrongQuestionIds, question.id);
+    addToListUnique(record.correctQuestionIds, question.id);
   } else {
     record.currentStreak = 0;
-    if (!record.wrongQuestionIds.includes(question.id)) {
-      record.wrongQuestionIds.push(question.id);
-    }
+    addToListUnique(record.wrongQuestionIds, question.id);
+    removeFromList(record.correctQuestionIds, question.id);
   }
 
   saveUserRecord(record);
@@ -1508,6 +1524,15 @@ function setupStartScreen() {
     });
   });
 
+  const levelButtons = document.querySelectorAll("#level-select .option-btn");
+  levelButtons.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      levelButtons.forEach((b) => b.classList.remove("selected"));
+      btn.classList.add("selected");
+      state.level = btn.dataset.level;
+    });
+  });
+
   document.getElementById("category-select").addEventListener("change", (e) => {
     state.category = e.target.value;
   });
@@ -1515,6 +1540,7 @@ function setupStartScreen() {
   document.getElementById("btn-start").addEventListener("click", beginQuizSession);
   document.getElementById("btn-reload-data").addEventListener("click", loadAllData);
   document.getElementById("btn-answer").addEventListener("click", submitAnswer);
+  document.getElementById("btn-quit-early").addEventListener("click", quitQuizEarly);
   document.getElementById("btn-next").addEventListener("click", goToNextQuestion);
   document.getElementById("btn-restart").addEventListener("click", resetToStart);
   document.getElementById("btn-review-wrong").addEventListener("click", startReviewSession);
@@ -1523,8 +1549,8 @@ function setupStartScreen() {
 // カテゴリ一覧は「実際に生成された問題」から動的に作る。
 // 将来スプレッドシートに新ジャンルのシートを追加しても、
 // 問題さえ生成されればカテゴリが自動的に選択肢に現れます。
-// 「不正解問題」は、現在のユーザーの不正解リストに該当モードの問題が
-// 1問でもある場合だけ選択肢に追加する（無い場合は選択肢自体を出さない）。
+// 「不正解問題」「正解問題」は、現在のユーザーの不正解/正解済みリストに
+// 該当モードの問題が1問でもある場合だけ選択肢に追加する（無ければ出さない）。
 function populateCategorySelect() {
   const select = document.getElementById("category-select");
   select.innerHTML = "";
@@ -1542,17 +1568,20 @@ function populateCategorySelect() {
   const options = ["全カテゴリ"];
 
   const wrongIds = currentUserRecord ? currentUserRecord.wrongQuestionIds : [];
+  const correctIds = currentUserRecord ? currentUserRecord.correctQuestionIds : [];
   const wrongCountInPool = pool.filter((q) => wrongIds.includes(q.id)).length;
-  if (wrongCountInPool > 0) {
-    options.push(WRONG_CATEGORY);
-  }
+  const correctCountInPool = pool.filter((q) => correctIds.includes(q.id)).length;
+  if (wrongCountInPool > 0) options.push(WRONG_CATEGORY);
+  if (correctCountInPool > 0) options.push(CORRECT_CATEGORY);
 
   options.push(...ordered);
 
   options.forEach((cat) => {
     const opt = document.createElement("option");
     opt.value = cat;
-    opt.textContent = cat === WRONG_CATEGORY ? `不正解問題（${wrongCountInPool}問）` : cat;
+    if (cat === WRONG_CATEGORY) opt.textContent = `不正解問題（${wrongCountInPool}問）`;
+    else if (cat === CORRECT_CATEGORY) opt.textContent = `正解問題（${correctCountInPool}問）`;
+    else opt.textContent = cat;
     select.appendChild(opt);
   });
   state.category = "全カテゴリ";
@@ -1565,11 +1594,11 @@ function validateStartButton() {
 
 // ---- 出題プールを組み立ててセッションを開始する ----
 function beginQuizSession() {
-  const pool = buildFilteredPool(state.mode, state.category);
+  const pool = buildFilteredPool(state.mode, state.category, state.level);
 
   if (pool.length === 0) {
     document.getElementById("start-warning").textContent =
-      "選択した条件に合う問題がありません。カテゴリを変更してください。";
+      "選択した条件に合う問題がありません。カテゴリやレベルを変更してください。";
     return;
   }
   document.getElementById("start-warning").textContent = "";
@@ -1578,14 +1607,14 @@ function beginQuizSession() {
   state.sessionQuestions = pickSessionQuestions(pool, n, state.mode);
   state.currentIndex = 0;
   state.userAnswers = [];
-  state.isReviewSession = state.category === WRONG_CATEGORY;
+  state.isReviewSession = state.category === WRONG_CATEGORY || state.category === CORRECT_CATEGORY;
   newStreakRecordThisSession = false;
 
   showScreen("screen-quiz");
   renderQuestion();
 }
 
-function buildFilteredPool(mode, category) {
+function buildFilteredPool(mode, category, level) {
   let pool;
   if (mode === "knowledge") pool = knowledgeQuestions;
   else if (mode === "practice") pool = practiceQuestions;
@@ -1593,12 +1622,32 @@ function buildFilteredPool(mode, category) {
 
   if (category === WRONG_CATEGORY) {
     const wrongIds = currentUserRecord ? currentUserRecord.wrongQuestionIds : [];
-    return pool.filter((q) => wrongIds.includes(q.id));
-  }
-  if (category && category !== "全カテゴリ") {
+    pool = pool.filter((q) => wrongIds.includes(q.id));
+  } else if (category === CORRECT_CATEGORY) {
+    const correctIds = currentUserRecord ? currentUserRecord.correctQuestionIds : [];
+    pool = pool.filter((q) => correctIds.includes(q.id));
+  } else if (category && category !== "全カテゴリ") {
     pool = pool.filter((q) => q.category === category);
   }
+
+  if (level && level !== "全レベル") {
+    pool = pool.filter((q) => q.difficulty === level);
+  }
+
   return pool;
+}
+
+// ---- 途中退出：それまでに回答した分だけで結果画面を表示する ----
+function quitQuizEarly() {
+  if (state.userAnswers.length === 0) {
+    alert("まだ1問も回答していません。1問以上回答してから終了してください。");
+    return;
+  }
+  const ok = confirm(`ここまで${state.userAnswers.length}問回答済みです。ここで終了して結果を見ますか？`);
+  if (!ok) return;
+
+  renderResultScreen();
+  showScreen("screen-result");
 }
 
 // ミックスモードでは知識問題・実践提案問題が偏りすぎないように抽出する
@@ -1914,6 +1963,7 @@ function renderResultScreen() {
     document.getElementById("result-total-correct").textContent = `${r.totalCorrect}問`;
     document.getElementById("result-total-rate").textContent = `${totalRate}%`;
     document.getElementById("result-wrong-count").textContent = `${r.wrongQuestionIds.length}問`;
+    document.getElementById("result-correct-count").textContent = `${r.correctQuestionIds.length}問`;
   }
 
   const wrongList = document.getElementById("wrong-list");
@@ -1968,15 +2018,19 @@ function startReviewSession() {
 function resetToStart() {
   state.mode = null;
   state.category = "全カテゴリ";
+  state.level = "全レベル";
   state.countOption = null;
   state.sessionQuestions = [];
   state.currentIndex = 0;
   state.userAnswers = [];
   state.isReviewSession = false;
 
-  document.querySelectorAll("#mode-select .option-btn, #count-select .option-btn").forEach((b) =>
+  document.querySelectorAll("#mode-select .option-btn, #count-select .option-btn, #level-select .option-btn").forEach((b) =>
     b.classList.remove("selected")
   );
+  // レベルは「全レベル」がデフォルト選択状態に戻る
+  document.querySelector('#level-select .option-btn[data-level="全レベル"]').classList.add("selected");
+
   document.getElementById("btn-start").disabled = true;
   document.getElementById("start-warning").textContent = "";
   renderBestRecordOnStart();
