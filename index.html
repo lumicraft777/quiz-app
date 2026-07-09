@@ -7,7 +7,7 @@
 <!-- style.css / script.js を編集したら ?v= の数字を必ず増やすこと。
      増やさないと、ブラウザにキャッシュされた古いファイルが
      読み込まれ続け、コード修正がユーザーの端末に反映されないため。 -->
-<link rel="stylesheet" href="style.css?v=7">
+<link rel="stylesheet" href="style.css?v=8">
 </head>
 <body>
 
@@ -21,8 +21,9 @@
 
   <!-- ============================================================
        画面0：ユーザー入力画面
-       自己ベスト・連続正解数・不正解リストはユーザーごとにlocalStorageで
-       記録するため、最初にユーザー名を確定させる
+       自己ベスト・連続正解数・不正解リストはSupabase上でユーザー名＋PIN
+       ごとに記録するため、最初にログイン（未登録なら新規登録）する。
+       同じユーザー名・PINなら、どの端末・ブラウザからでも同じ記録になる。
   ============================================================= -->
   <section id="screen-user" class="screen active">
     <header class="app-header">
@@ -31,9 +32,10 @@
     </header>
 
     <div class="card">
-      <h2 class="card-title">ユーザー名を入力してください</h2>
-      <p class="user-desc">自己ベスト・連続正解数・間違えた問題は、ユーザーごとに分けて記録されます。他の人の記録は表示されません。</p>
-      <input type="text" id="username-input" class="select-box" placeholder="例：山田" maxlength="20" autocomplete="off">
+      <h2 class="card-title">ユーザー名とPINを入力してください</h2>
+      <p class="user-desc">自己ベスト・連続正解数・間違えた問題は、ユーザー名＋PINで記録されます。他の人の記録は見えません。初めての名前の場合は、そのPINで新規登録されます。同じユーザー名＋PINならスマホ・PCなどどの端末からでも記録を引き継げます。</p>
+      <input type="text" id="username-input" class="select-box" placeholder="ユーザー名（例：山田）" maxlength="20" autocomplete="off">
+      <input type="password" id="pin-input" class="select-box" placeholder="PIN（4桁以上の数字）" maxlength="10" inputmode="numeric" autocomplete="off">
       <p id="username-warning" class="warning-text"></p>
       <button type="button" id="btn-user-start" class="btn-primary btn-large">このユーザーで開始</button>
     </div>
@@ -52,7 +54,10 @@
 
     <div class="user-bar">
       <span id="current-user-label" class="current-user-label"></span>
-      <button type="button" id="btn-switch-user" class="link-btn">ユーザーを切り替える</button>
+      <span class="user-bar-links">
+        <button type="button" id="btn-show-ranking" class="link-btn">ランキングを見る</button>
+        <button type="button" id="btn-switch-user" class="link-btn">ユーザーを切り替える</button>
+      </span>
     </div>
 
     <div class="card">
@@ -108,6 +113,25 @@
       <ul id="data-status-detail" class="data-status-detail" hidden></ul>
       <button type="button" id="btn-reload-data" class="link-btn" hidden>再読み込み</button>
     </div>
+  </section>
+
+  <!-- ============================================================
+       画面1.5：ランキング画面
+       全ユーザー横断の成績。ユーザー名以外の個人情報（PIN等）は表示しない
+  ============================================================= -->
+  <section id="screen-ranking" class="screen">
+    <header class="app-header">
+      <h1>ランキング</h1>
+      <p class="app-sub">正答率が高い順に表示しています（上位100名）</p>
+    </header>
+
+    <div class="card">
+      <div id="ranking-list" class="ranking-list"></div>
+      <p id="ranking-empty-text" class="muted-text" hidden>まだ誰も記録がありません。最初の1問に挑戦してみましょう！</p>
+      <p id="ranking-error-text" class="warning-text" hidden></p>
+    </div>
+
+    <button type="button" id="btn-ranking-back" class="btn-primary btn-large">戻る</button>
   </section>
 
   <!-- ============================================================
@@ -264,6 +288,6 @@
 
 </div>
 
-<script src="script.js?v=12"></script>
+<script src="script.js?v=13"></script>
 </body>
 </html>

@@ -219,7 +219,8 @@ body {
   color: var(--color-muted);
   text-align: left;
 }
-#username-input {
+#username-input,
+#pin-input {
   margin-bottom: 8px;
 }
 .user-bar {
@@ -228,10 +229,16 @@ body {
   justify-content: space-between;
   padding: 4px 4px 12px;
   font-size: 0.85rem;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 .current-user-label {
   color: var(--color-primary-dark);
   font-weight: bold;
+}
+.user-bar-links {
+  display: flex;
+  gap: 12px;
 }
 .link-btn {
   background: none;
@@ -241,6 +248,54 @@ body {
   font-size: 0.85rem;
   cursor: pointer;
   padding: 4px;
+}
+
+/* ============================================================
+   ランキング画面
+   ============================================================= */
+.ranking-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ranking-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #f9fbfa;
+  border: 2px solid var(--color-border);
+}
+.ranking-row.is-top3 {
+  border-color: var(--color-accent);
+  background: #fff6ef;
+}
+.ranking-rank {
+  flex: none;
+  width: 28px;
+  font-weight: bold;
+  text-align: center;
+  color: var(--color-muted);
+}
+.ranking-row.is-top3 .ranking-rank {
+  color: var(--color-accent);
+}
+.ranking-name {
+  flex: 1 1 auto;
+  font-weight: bold;
+  overflow-wrap: anywhere;
+}
+.ranking-stats {
+  flex: none;
+  text-align: right;
+  font-size: 0.8rem;
+  color: var(--color-muted);
+  line-height: 1.4;
+}
+.ranking-stats b {
+  color: var(--color-primary-dark);
+  font-size: 0.95rem;
 }
 .quit-early-btn {
   display: block;

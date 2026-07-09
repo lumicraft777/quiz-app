@@ -1,249 +1,57 @@
 /* ================================================================
-   蓄電池メーカー比較クイズ - script.js（スプレッドシート連携版）
+   蓄電池メーカー比較クイズ - script.js（Supabase連携版）
    ----------------------------------------------------------------
-   このファイルは大きく5つのパートに分かれています。
-   [パート1] 設定（スプレッドシートID・シート構成）
-   [パート2] スプレッドシート読み込み・CSVパース・列名マッピング
-   [パート3] 知識問題の自動生成ロジック
-   [パート4] 実践提案問題の自動生成ロジック
-   [パート5] 画面制御・クイズ進行ロジック（アプリ本体）
+   このファイルは大きく4つのパートに分かれています。
+   [パート1] Supabase設定・共通リクエスト関数
+   [パート2] 画面制御・クイズ進行ロジック（アプリ本体）
+   [パート3] ユーザー管理（ユーザー名+PIN・Supabase RPC経由）
+   [パート4] 演出・効果音（ゲーム的な楽しさのための仕掛け）
 
-   ★ データはすべてGoogleスプレッドシートから読み込みます。
-     アプリ内にはデータを一切埋め込んでいません。
-     スプレッドシートを編集 → アプリを再読み込みするだけで
-     問題が最新データから自動生成されます。
-
-   ★ 注意：Googleの仕様上、file:// で直接HTMLを開くと
-     スプレッドシートの読み込みがブロックされます（CORS制限）。
-     必ずローカルサーバー経由（http://localhost/...）で開いてください。
-     例：フォルダ内で  python -m http.server 8000  を実行し
-         http://localhost:8000 をブラウザで開く
+   ★ 問題データはSupabaseの questions テーブルから読み込みます。
+     スプレッドシートは「元データ」として引き続き使いますが、
+     ブラウザは直接読みに行きません。スプレッドシートを更新したら、
+     scripts/sync-questions.js を実行してSupabase側を更新してください
+     （詳しくはREADME参照）。
+   ★ 自己ベスト・連続正解数・不正解/正解済みリストなどの成績は、
+     ユーザー名＋4桁PINで識別するSupabaseの users / answer_history
+     テーブルに保存されます（他人が同じ名前を使ってもPINが違えば
+     ログインできません）。
    ================================================================ */
 
 
 /* ================================================================
-   [パート1] 設定
+   [パート1] Supabase設定・共通リクエスト関数
    ================================================================ */
 
-// 読み込むGoogleスプレッドシートのID（URLの /d/ と /edit の間の文字列）
-const SPREADSHEET_ID = "13746scYc9hBgqWgvCyXuCS9olrbaxWqsIvDpLiwjtBw";
+const SUPABASE_URL = "https://ossmlptnlcmopjhzwegn.supabase.co";
+// publishable key（旧: anon key）。RLSで保護されているため、
+// このキーがブラウザに露出しても安全な設計になっている。
+const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_t1-i-dCF-KDCmBBKrCzWjw_wZ5fu4G-";
 
-// 読み込むシートの一覧。
-// 将来「屋根の特徴」「地域ごとの補助金」「エコキュート」など
-// 別ジャンルのシートを追加したくなったら、ここに追記していく想定です。
-//   name  : 画面表示やログで使う名前
-//   sheet : スプレッドシート下部のタブ名（"" なら先頭のシートを読む）
-//   type  : データの種類。現状は "battery"（蓄電池メーカー比較表）のみ対応。
-//           新ジャンルを追加する場合は、そのtype用の問題生成関数を
-//           パート3/4に追加し、initApp内で分岐させてください。
-const SHEET_CONFIG = [
-  { name: "蓄電池メーカー比較", sheet: "", type: "battery" }
-];
-
-// スプレッドシートの列名 → アプリ内部のキー名 の対応表。
-// 列の並び順が変わっても、この見出し名で照合するので問題ありません。
-const COLUMN_MAP = {
-  "メーカー名": "maker",
-  "製品名・シリーズ名": "series",
-  "型番": "model",
-  "蓄電容量/kWh": "capacityKwh",
-  "実効容量/kWh": "usableCapacityKwh",
-  "電池材料・種類": "batteryMaterial",
-  "蓄電池タイプ": "batteryType",
-  "負荷タイプ": "loadType",
-  "対応年数/設計寿命": "lifespan",
-  "製品保証年数": "warrantyYears",
-  "容量保証年数": "capacityWarrantyYears",
-  "自然災害補償": "disasterCompensation",
-  "停電時出力": "outageOutput",
-  "定格出力": "ratedOutput",
-  "太陽光連携": "solarLink",
-  "V2H対応": "v2h",
-  "AI制御/HEMS対応": "aiHems",
-  "屋内/屋外設置": "installation",
-  "サイズ": "size",
-  "重量": "weight",
-  "主な特徴": "feature",
-  "メリット": "merit",
-  "デメリット": "demerit",
-  "向いている家庭": "suitableFamily",
-  "営業時の訴求ポイント": "salesPoint",
-  "公式URL": "url",
-  "参照資料名": "sourceDoc",
-  "情報確認日": "checkedDate",
-  "備考": "note"
-};
-
-
-/* ================================================================
-   [パート2] スプレッドシート読み込み・CSVパース・列名マッピング
-   ================================================================ */
-
-// gviz エンドポイントは共有リンク設定のシートをCSVとして返してくれる
-function buildCsvUrl(sheetName) {
-  let url = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?tqx=out:csv`;
-  if (sheetName) {
-    url += `&sheet=${encodeURIComponent(sheetName)}`;
-  }
-  // スプレッドシートを更新した直後でも、ブラウザ/回線上のキャッシュに
-  // 古いCSVが残って反映されないことがあるため、毎回異なる値を付けて回避する
-  url += `&_=${Date.now()}`;
-  return url;
-}
-
-// ダブルクォート・セル内カンマ・セル内改行に対応した簡易CSVパーサー
-function parseCsv(text) {
-  const rows = [];
-  let row = [];
-  let cell = "";
-  let inQuotes = false;
-
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
-
-    if (inQuotes) {
-      if (ch === '"') {
-        if (text[i + 1] === '"') {
-          cell += '"'; // "" はエスケープされた1つの引用符
-          i++;
-        } else {
-          inQuotes = false;
-        }
-      } else {
-        cell += ch;
-      }
-    } else {
-      if (ch === '"') {
-        inQuotes = true;
-      } else if (ch === ",") {
-        row.push(cell);
-        cell = "";
-      } else if (ch === "\n" || ch === "\r") {
-        if (ch === "\r" && text[i + 1] === "\n") i++; // CRLF対応
-        row.push(cell);
-        cell = "";
-        rows.push(row);
-        row = [];
-      } else {
-        cell += ch;
-      }
+async function supabaseFetch(pathAndQuery, options) {
+  return fetch(`${SUPABASE_URL}/rest/v1/${pathAndQuery}`, {
+    ...options,
+    headers: {
+      apikey: SUPABASE_PUBLISHABLE_KEY,
+      Authorization: `Bearer ${SUPABASE_PUBLISHABLE_KEY}`,
+      "Content-Type": "application/json",
+      ...(options && options.headers)
     }
-  }
-  // 最終行の処理
-  if (cell !== "" || row.length > 0) {
-    row.push(cell);
-    rows.push(row);
-  }
-  return rows;
+  });
 }
 
-// CSVの行列データを製品オブジェクトの配列に変換する。
-// ・見出し行は「メーカー名」を含む行を自動検出（先頭に説明行があってもOK）
-// ・メーカー名または製品名が空の行はスキップ（ランキング等のメモ行対策）
-// ・見出し行が繰り返し貼り付けられていてもスキップ
-function rowsToProducts(rows) {
-  // 見出し行を探す
-  let headerRowIndex = -1;
-  for (let i = 0; i < Math.min(rows.length, 10); i++) {
-    if (rows[i].some((c) => c.trim() === "メーカー名")) {
-      headerRowIndex = i;
-      break;
-    }
-  }
-  if (headerRowIndex === -1) {
-    return { products: [], error: "見出し行（「メーカー名」列）が見つかりません。" };
-  }
-
-  const headers = rows[headerRowIndex].map((h) => h.trim());
-  // 列番号 → 内部キー名 の対応を作る
-  const colKeys = headers.map((h) => COLUMN_MAP[h] || null);
-
-  const products = [];
-  for (let i = headerRowIndex + 1; i < rows.length; i++) {
-    const cells = rows[i];
-    const obj = {};
-    colKeys.forEach((key, idx) => {
-      if (!key) return;
-      obj[key] = (cells[idx] || "").trim();
-    });
-
-    // メーカー名・製品名がない行はデータ行ではないのでスキップ
-    if (!obj.maker || !obj.series) continue;
-    // 貼り付け時に見出し行が混ざっていた場合もスキップ
-    if (obj.maker === "メーカー名") continue;
-
-    products.push(obj);
-  }
-
-  return { products, error: null };
-}
-
-// スプレッドシートを読み込んで製品配列を返す
-async function loadProductsFromSheet(sheetConf) {
-  const url = buildCsvUrl(sheetConf.sheet);
-  const res = await fetch(url);
+// Supabaseのrpc（データベース関数）を呼び出す共通ヘルパー
+async function supabaseRpc(fnName, params) {
+  const res = await supabaseFetch(`rpc/${fnName}`, {
+    method: "POST",
+    body: JSON.stringify(params || {})
+  });
+  const data = await res.json().catch(() => null);
   if (!res.ok) {
-    throw new Error(`スプレッドシートの取得に失敗しました（HTTP ${res.status}）`);
+    const message = (data && data.message) || `${fnName} の呼び出しに失敗しました`;
+    throw new Error(message);
   }
-  const text = await res.text();
-  if (!text.trim()) {
-    return []; // シートが空
-  }
-  const { products, error } = rowsToProducts(parseCsv(text));
-  if (error) {
-    throw new Error(error);
-  }
-  return products;
-}
-
-
-/* ================================================================
-   共通ユーティリティ
-   ================================================================ */
-
-let questionIdCounter = 1;
-function nextQuestionId(prefix) {
-  return prefix + String(questionIdCounter++).padStart(3, "0");
-}
-
-// 「不明」「空欄」「未確認」「公式未確認」を判定する。
-// これらの値は問題化の対象にしない。
-function isUnknownValue(value) {
-  if (value === undefined || value === null) return true;
-  const s = String(value).trim();
-  if (s === "") return true;
-  if (s === "不明" || s === "未確認" || s === "－" || s === "-") return true;
-  if (s.startsWith("不明")) return true;
-  if (s.includes("公式未確認")) return true;
-  // 「判断保留」は本来ランキング等の判断を保留する際の記法だが、
-  // 通常の項目セルに誤って入力されると調査メモがそのまま出題・解説に
-  // 出てしまうため、こちらも「不明」と同様に扱う
-  if (s.startsWith("判断保留")) return true;
-  // 「主な特徴」「メリット」「営業時の訴求ポイント」等のセルに、
-  // 本来の文章の代わりに参照用のURLだけが誤って入力されているケースがある。
-  // そのまま出題・解説に出すと意味不明な選択肢になるため「不明」扱いにする。
-  if (/^https?:\/\/\S+$/i.test(s)) return true;
-  return false;
-}
-
-// 「あり/対応/可/○」系かどうか・「なし/非対応/不可/×」系かどうかの判定
-function isPositiveValue(value) {
-  if (isUnknownValue(value)) return false;
-  const s = String(value).trim();
-  if (isNegativeValue(s)) return false;
-  return /あり|対応|可|○|◯|〇|有/.test(s);
-}
-function isNegativeValue(value) {
-  if (isUnknownValue(value)) return false;
-  const s = String(value).trim();
-  return /^(なし|非対応|不可|無|×|✕)/.test(s) || /非対応|連携できない|対応していない/.test(s);
-}
-
-// 文字列の先頭付近から最初の数値を取り出す（"16.6kWh" → 16.6、"15年" → 15）
-function parseLeadingNumber(value) {
-  if (isUnknownValue(value)) return null;
-  const m = String(value).replace(/,/g, "").match(/(\d+(\.\d+)?)/);
-  return m ? Number(m[1]) : null;
+  return data;
 }
 
 // 配列をシャッフルして新しい配列を返す（元の配列は壊さない）
@@ -256,703 +64,9 @@ function shuffleArray(arr) {
   return copy;
 }
 
-function pickRandomN(arr, n) {
-  return shuffleArray(arr).slice(0, n);
-}
-
-function makerLabel(p) {
-  return `${p.maker} ${p.series}`;
-}
-
-// 「」でくくられた文章が二重括弧にならないよう外側の記号を外す
-function stripOuterQuotes(text) {
-  const s = String(text).trim();
-  if (s.startsWith("「") && s.endsWith("」")) {
-    return s.slice(1, -1);
-  }
-  return s;
-}
-
 
 /* ================================================================
-   [パート3] 知識問題の自動生成ロジック
-   ----------------------------------------------------------------
-   スプレッドシートの各行から、以下のルールで4択問題を作ります。
-   ・値が「不明」「空欄」「公式未確認」の項目は問題化しない
-   ・ダミー選択肢は他の行の異なる値から作る（3つ未満なら生成しない）
-   ・解説には「主な特徴」「メリット」「営業時の訴求ポイント」を必ず含める
-   ================================================================ */
-
-// 解説文を組み立てる。特徴・メリット・訴求ポイントのうち
-// スプレッドシートに値があるものだけを使う。
-function buildKnowledgeExplanation(p) {
-  const parts = [];
-  if (!isUnknownValue(p.feature)) {
-    parts.push(`${p.maker}「${p.series}」は、${stripOuterQuotes(p.feature)}という特徴があります。`);
-  }
-  if (!isUnknownValue(p.merit)) {
-    parts.push(`メリットとしては「${stripOuterQuotes(p.merit)}」という点が挙げられます。`);
-  }
-  if (!isUnknownValue(p.salesPoint)) {
-    parts.push(`営業時には「${stripOuterQuotes(p.salesPoint)}」という伝え方が効果的です。`);
-  }
-  if (parts.length === 0) {
-    parts.push(`${p.maker}「${p.series}」の詳細はスプレッドシートの元データを確認してください。`);
-  }
-  return parts.join("");
-}
-
-/* ---- 3-1. 「製品→フィールドの値」を問う問題（例：保証年数は？） ----
-   choiceExplanations：各選択肢について、正解なら「実際の値」を、
-   誤答ならその値が本当はどの製品のものかを明示して「なぜ違うか」を示す。
-------------------------------------------------------------- */
-function genFieldQuestions(products, field, questionTextFn, category, difficulty) {
-  const questions = [];
-
-  products.forEach((p) => {
-    const correctRaw = p[field];
-    if (isUnknownValue(correctRaw)) return; // 不明な項目は問題化しない
-
-    const correctText = String(correctRaw).trim();
-
-    // 他の製品から「異なる値」を集めてダミー選択肢の候補にする（出どころの製品も保持）
-    const seen = new Set([correctText]);
-    const distractorPool = [];
-    products.forEach((other) => {
-      if (other === p) return;
-      const v = other[field];
-      if (isUnknownValue(v)) return;
-      const t = String(v).trim();
-      if (seen.has(t)) return;
-      seen.add(t);
-      distractorPool.push({ text: t, product: other });
-    });
-
-    if (distractorPool.length < 3) return; // 選択肢が足りない場合は生成しない
-
-    const distractors = pickRandomN(distractorPool, 3);
-    const choices = shuffleArray([correctText, ...distractors.map((d) => d.text)]);
-
-    const choiceExplanations = {};
-    choiceExplanations[correctText] = {
-      result: "正解",
-      reason: `${p.maker}「${p.series}」の実際の値は「${correctText}」です。${buildKnowledgeExplanation(p)}`
-    };
-    distractors.forEach((d) => {
-      choiceExplanations[d.text] = {
-        result: "不正解",
-        reason: `「${d.text}」は${d.product.maker}「${d.product.series}」の値であり、${p.maker}「${p.series}」の値ではありません。${p.maker}「${p.series}」の正しい値は「${correctText}」です。`
-      };
-    });
-
-    questions.push({
-      id: nextQuestionId("q"),
-      mode: "knowledge",
-      category,
-      difficulty,
-      question: questionTextFn(p),
-      customerScenario: "",
-      choices,
-      answer: correctText,
-      explanation: buildKnowledgeExplanation(p),
-      choiceExplanations,
-      sourceManufacturer: p.maker,
-      sourceProduct: p.series
-    });
-  });
-
-  return questions;
-}
-
-/* ---- 3-2. 「文章→メーカー・製品名」を当てる逆引き問題 ---- */
-function genReverseQuestions(products, field, questionPrefix, category, difficulty, answerType) {
-  const questions = [];
-
-  products.forEach((p) => {
-    if (isUnknownValue(p[field])) return;
-    const stem = stripOuterQuotes(p[field]);
-
-    const correctAnswer = answerType === "product" ? makerLabel(p) : p.maker;
-
-    const distractorPool = [];
-    const seen = new Set([correctAnswer]);
-    products.forEach((other) => {
-      if (other === p) return;
-      const label = answerType === "product" ? makerLabel(other) : other.maker;
-      if (seen.has(label)) return;
-      seen.add(label);
-      distractorPool.push({ label, product: other });
-    });
-
-    if (distractorPool.length < 3) return;
-
-    const distractors = pickRandomN(distractorPool, 3);
-    const choices = shuffleArray([correctAnswer, ...distractors.map((d) => d.label)]);
-
-    const choiceExplanations = {};
-    choiceExplanations[correctAnswer] = {
-      result: "正解",
-      reason: `この文章は${p.maker}「${p.series}」についての記述です。${buildKnowledgeExplanation(p)}`
-    };
-    distractors.forEach((d) => {
-      const ownText = !isUnknownValue(d.product[field]) ? stripOuterQuotes(d.product[field]) : null;
-      // d.labelはメーカー名のみの場合があるため、解説では必ず具体的な製品名まで
-      // 明記する（「どの製品と比較して不正解なのか」を常に追える状態にする）
-      const specificName = `${d.product.maker}「${d.product.series}」`;
-      choiceExplanations[d.label] = {
-        result: "不正解",
-        reason: ownText
-          ? `${specificName}自体の該当項目は「${ownText}」であり、今回の文章とは異なります。今回の文章が指しているのは${p.maker}「${p.series}」です。`
-          : `${specificName}にはこの文章に該当する記載がなく、今回の文章が指しているのは${p.maker}「${p.series}」です。`
-      };
-    });
-
-    questions.push({
-      id: nextQuestionId("q"),
-      mode: "knowledge",
-      category,
-      difficulty,
-      question: `${questionPrefix}\n${stem}`,
-      customerScenario: "",
-      choices,
-      answer: correctAnswer,
-      explanation: buildKnowledgeExplanation(p),
-      choiceExplanations,
-      sourceManufacturer: p.maker,
-      sourceProduct: p.series
-    });
-  });
-
-  return questions;
-}
-
-/* ---- 3-3. 「あり/なし」項目の問題（V2H・災害補償・AI/HEMSなど） ---- */
-function genBooleanQuestions(products, field, questionTexts, category, difficulty) {
-  const questions = [];
-
-  const trueList = products.filter((p) => isPositiveValue(p[field]));
-  const falseList = products.filter((p) => isNegativeValue(p[field]));
-
-  // 「あり」製品を正解にして「なし」製品をダミーにする
-  if (trueList.length >= 1 && falseList.length >= 3) {
-    trueList.forEach((correctP) => {
-      const distractors = pickRandomN(falseList, 3);
-      questions.push(buildBooleanQuestion(correctP, distractors, questionTexts.positive, category, difficulty, field));
-    });
-  }
-
-  // 「なし」製品を正解にして「あり」製品をダミーにする
-  if (falseList.length >= 1 && trueList.length >= 3) {
-    falseList.forEach((correctP) => {
-      const distractors = pickRandomN(trueList, 3);
-      questions.push(buildBooleanQuestion(correctP, distractors, questionTexts.negative, category, difficulty, field));
-    });
-  }
-
-  return questions;
-}
-
-function buildBooleanQuestion(correctP, distractorPs, questionText, category, difficulty, field) {
-  const choices = shuffleArray([makerLabel(correctP), ...distractorPs.map(makerLabel)]);
-
-  const choiceExplanations = {};
-  choiceExplanations[makerLabel(correctP)] = {
-    result: "正解",
-    reason: `${makerLabel(correctP)}の該当項目は「${correctP[field]}」で、条件に一致します。${buildKnowledgeExplanation(correctP)}`
-  };
-  distractorPs.forEach((dp) => {
-    choiceExplanations[makerLabel(dp)] = {
-      result: "不正解",
-      reason: `${makerLabel(dp)}の該当項目は「${isUnknownValue(dp[field]) ? "不明" : dp[field]}」であり、今回問われている条件とは一致しません。`
-    };
-  });
-
-  return {
-    id: nextQuestionId("q"),
-    mode: "knowledge",
-    category,
-    difficulty,
-    question: questionText,
-    customerScenario: "",
-    choices,
-    answer: makerLabel(correctP),
-    explanation: buildKnowledgeExplanation(correctP),
-    choiceExplanations,
-    sourceManufacturer: correctP.maker,
-    sourceProduct: correctP.series
-  };
-}
-
-/* ---- 3-4. 複数メーカー比較問題（数値の最大・最小を当てる上級問題） ---- */
-function genExtremeQuestion(products, field, mode, questionText, category, difficulty) {
-  const valid = products
-    .map((p) => ({ p, num: parseLeadingNumber(p[field]) }))
-    .filter((x) => x.num !== null);
-  if (valid.length < 4) return null;
-
-  const sorted = valid.slice().sort((a, b) => (mode === "max" ? b.num - a.num : a.num - b.num));
-  const extremeVal = sorted[0].num;
-  const tied = sorted.filter((x) => x.num === extremeVal);
-  if (tied.length !== 1) return null; // 同値タイの場合は問題として成立しない
-
-  const correctP = tied[0].p;
-  const others = pickRandomN(valid.filter((x) => x.p !== correctP), 3);
-  if (others.length < 3) return null;
-
-  const choices = shuffleArray([makerLabel(correctP), ...others.map((x) => makerLabel(x.p))]);
-
-  const comparisonWord = mode === "max" ? "大きく" : "小さく";
-  const choiceExplanations = {};
-  choiceExplanations[makerLabel(correctP)] = {
-    result: "正解",
-    reason: `${makerLabel(correctP)}の実際の値は${correctP[field]}で、比較対象の中で最も${mode === "max" ? "大きい" : "小さい"}値です。${buildKnowledgeExplanation(correctP)}`
-  };
-  others.forEach((x) => {
-    choiceExplanations[makerLabel(x.p)] = {
-      result: "不正解",
-      reason: `${makerLabel(x.p)}の実際の値は${x.p[field]}で、正解ほど${comparisonWord}ありません。`
-    };
-  });
-
-  return {
-    id: nextQuestionId("q"),
-    mode: "knowledge",
-    category,
-    difficulty,
-    question: questionText,
-    customerScenario: "",
-    choices,
-    answer: makerLabel(correctP),
-    explanation:
-      buildKnowledgeExplanation(correctP) +
-      `参考値：${correctP[field]}。` +
-      `比較問題では、営業トークで「どこが一番強みか」を数字で語れるようにしておくことが大切です。`,
-    choiceExplanations,
-    sourceManufacturer: correctP.maker,
-    sourceProduct: correctP.series
-  };
-}
-
-/* ---- 3-5. 蓄電池シート用：知識問題プールの組み立て ---- */
-function generateKnowledgeQuestions(products) {
-  let qs = [];
-
-  // ===== 初級：基本情報 =====
-  qs = qs.concat(genFieldQuestions(products, "warrantyYears",
-    (p) => `${p.maker}「${p.series}」の製品保証年数として正しいものはどれ？`, "保証", "初級"));
-  qs = qs.concat(genFieldQuestions(products, "capacityWarrantyYears",
-    (p) => `${p.maker}「${p.series}」の容量保証として正しいものはどれ？`, "保証", "初級"));
-  qs = qs.concat(genFieldQuestions(products, "capacityKwh",
-    (p) => `${p.maker}「${p.series}」の蓄電容量(kWh)として正しいものはどれ？`, "容量", "初級"));
-  qs = qs.concat(genFieldQuestions(products, "usableCapacityKwh",
-    (p) => `${p.maker}「${p.series}」の実効容量(kWh)として正しいものはどれ？`, "容量", "初級"));
-  qs = qs.concat(genFieldQuestions(products, "batteryMaterial",
-    (p) => `${p.maker}「${p.series}」に採用されている電池材料・種類はどれ？`, "電池材料", "初級"));
-  qs = qs.concat(genFieldQuestions(products, "batteryType",
-    (p) => `${p.maker}「${p.series}」の蓄電池タイプ（ハイブリッド型/単機能型など）はどれ？`, "メーカー比較", "初級"));
-
-  // ===== 中級：特徴・負荷タイプ・停電時出力など =====
-  qs = qs.concat(genFieldQuestions(products, "loadType",
-    (p) => `${p.maker}「${p.series}」の負荷タイプ（停電時に使える範囲）はどれ？`, "停電対策", "中級"));
-  qs = qs.concat(genFieldQuestions(products, "outageOutput",
-    (p) => `${p.maker}「${p.series}」の停電時出力として正しいものはどれ？`, "停電対策", "中級"));
-  qs = qs.concat(genFieldQuestions(products, "lifespan",
-    (p) => `${p.maker}「${p.series}」の対応年数/設計寿命として正しいものはどれ？`, "保証", "中級"));
-  qs = qs.concat(genFieldQuestions(products, "solarLink",
-    (p) => `${p.maker}「${p.series}」の太陽光連携について正しい説明はどれ？`, "太陽光連携", "中級"));
-  qs = qs.concat(genFieldQuestions(products, "installation",
-    (p) => `${p.maker}「${p.series}」の設置条件（屋内/屋外）として正しいものはどれ？`, "メーカー比較", "中級"));
-  // V2Hは「対応/不明」しかなく明確な「非対応」行がないデータでも、
-  // 連携方式（V2Hポッド経由/eneplat経由 等）の違いから出題できるようにする
-  qs = qs.concat(genFieldQuestions(products, "v2h",
-    (p) => `${p.maker}「${p.series}」のV2H対応状況として正しいものはどれ？`, "V2H", "中級"));
-
-  // answerTypeは全て"product"（メーカー＋製品名）に統一している。
-  // 以前は"maker"（メーカー名のみ）を使っていたが、同じメーカーが複数製品を
-  // 持つ場合に「どの製品と比較して不正解なのか」が選択肢からは分からず、
-  // 選択肢ごとの解説を読んでも紐づけにくいという指摘を受けたため。
-  // 質問文もそもそも「製品はどれ？」と聞いているので、製品単位の方が一致する。
-  qs = qs.concat(genReverseQuestions(products, "suitableFamily",
-    "次のような家庭に向いている製品はどれ？", "メリット/デメリット", "中級", "product"));
-  qs = qs.concat(genReverseQuestions(products, "merit",
-    "次のメリットが特徴とされている製品はどれ？", "メリット/デメリット", "中級", "product"));
-  qs = qs.concat(genReverseQuestions(products, "salesPoint",
-    "次の営業トークが訴求ポイントとして合う製品はどれ？", "営業トーク", "中級", "product"));
-  qs = qs.concat(genReverseQuestions(products, "feature",
-    "次の特徴を持つ製品はどれ？", "メーカー比較", "中級", "product"));
-
-  // ===== 上級：デメリット・複数メーカー比較 =====
-  qs = qs.concat(genReverseQuestions(products, "demerit",
-    "次のデメリット（注意点）が指摘されている製品はどれ？", "メリット/デメリット", "上級", "product"));
-
-  qs = qs.concat(genBooleanQuestions(products, "v2h", {
-    positive: "V2H（電気自動車との連携）に対応しているのはどれ？",
-    negative: "V2H（電気自動車との連携）に対応していないのはどれ？"
-  }, "V2H", "中級"));
-
-  qs = qs.concat(genBooleanQuestions(products, "aiHems", {
-    positive: "AI制御・HEMS連携に対応しているのはどれ？",
-    negative: "AI制御・HEMS連携に対応していないのはどれ？"
-  }, "メーカー比較", "中級"));
-
-  qs = qs.concat(genBooleanQuestions(products, "disasterCompensation", {
-    positive: "自然災害補償が付帯しているのはどれ？",
-    negative: "自然災害補償が付帯していないのはどれ？"
-  }, "保証", "中級"));
-
-  const extremeCandidates = [
-    genExtremeQuestion(products, "capacityKwh", "max", "蓄電容量(kWh)が最も大きいのはどれ？", "メーカー比較", "上級"),
-    genExtremeQuestion(products, "capacityKwh", "min", "蓄電容量(kWh)が最も小さいのはどれ？", "メーカー比較", "上級"),
-    genExtremeQuestion(products, "warrantyYears", "max", "製品保証年数が最も長いのはどれ？", "保証", "上級"),
-    genExtremeQuestion(products, "warrantyYears", "min", "製品保証年数が最も短いのはどれ？", "保証", "上級")
-  ];
-  extremeCandidates.forEach((q) => { if (q) qs.push(q); });
-
-  return qs;
-}
-
-
-/* ================================================================
-   [パート4] 実践提案問題の自動生成ロジック
-   ----------------------------------------------------------------
-   スプレッドシートの「向いている家庭」「営業時の訴求ポイント」
-   「デメリット」列だけを材料にして、お客様状況→最適提案を選ぶ
-   問題を自動生成します（シートにない情報は使いません）。
-
-   仕組み：
-   1. 各製品の「向いている家庭」等の文章からキーワードで
-      重視カテゴリ（停電対策/電気代削減/…）を推定する
-   2. お客様状況カード＝「向いている家庭」の内容をそのまま提示
-   3. 正解＝その製品、ダミー＝重視カテゴリが異なる他製品
-      （カテゴリが同じ製品はダミーにしない＝正解が曖昧にならない）
-   4. 解説＝正解の理由（訴求ポイント）＋他の選択肢が弱い理由
-      （各製品のデメリット）＋注意点（正解製品のデメリット）
-   ================================================================ */
-
-// 実践カテゴリごとの判定キーワード。
-// 「向いている家庭」（重み2）と「メリット・主な特徴」（重み1）の中で
-// キーワードが何回ヒットしたかを数え、最もスコアが高いカテゴリに分類する。
-// （単純な優先順判定だと「初期費用を抑えて最低限の停電対策をしたい家庭」が
-//   停電対策に誤分類されるため、スコアリング方式にしている）
-const PRACTICE_CATEGORY_KEYWORDS = {
-  "EV/V2H": ["EV", "V2H", "トライブリッド", "電気自動車"],
-  "停電対策": ["停電", "災害", "防災", "バックアップ", "全負荷", "普段通り"],
-  "電気代削減": ["電気代", "自家消費", "卒FIT", "売電", "節電", "余剰"],
-  "初期費用": ["初期費用", "費用", "価格", "コスト", "安価", "予算", "エントリー", "手頃", "抑え"],
-  "保証・安心": ["保証", "補償", "安心", "長期", "信頼"],
-  "設置スペース": ["設置スペース", "省スペース", "狭小", "屋内", "コンパクト", "密集", "狭い"]
-};
-
-// 製品の「向いている家庭」等の文章から重視カテゴリを推定する
-function detectPracticeCategory(p) {
-  const primary = isUnknownValue(p.suitableFamily) ? "" : String(p.suitableFamily);
-  const secondary = [p.merit, p.feature]
-    .filter((t) => !isUnknownValue(t))
-    .join(" ");
-
-  let best = null;
-  let bestScore = 0;
-  for (const [category, words] of Object.entries(PRACTICE_CATEGORY_KEYWORDS)) {
-    let score = 0;
-    words.forEach((w) => {
-      if (primary.includes(w)) score += 2;
-      if (secondary.includes(w)) score += 1;
-    });
-    if (score > bestScore) {
-      bestScore = score;
-      best = category;
-    }
-  }
-  return best; // どのカテゴリにも該当しない場合は null（実践問題の対象外）
-}
-
-// カテゴリごとの「お客様が重視していること」の言い換え（画面表示用）
-const PRACTICE_PRIORITY_LABEL = {
-  "停電対策": "停電・災害時の安心",
-  "電気代削減": "電気代の削減効果",
-  "初期費用": "初期費用を抑えること",
-  "EV/V2H": "EV・V2Hとの連携",
-  "保証・安心": "長期保証・故障時の安心",
-  "設置スペース": "設置場所の制約への対応"
-};
-
-/* ----------------------------------------------------------------
-   カテゴリごとの「客観的な失格条件」定義。
-   ----------------------------------------------------------------
-   以前は「重視カテゴリが違う製品」というだけでダミー選択肢を選んでいたが、
-   これだと「人によっては他の選択肢も妥当では？」と解釈が割れやすいという
-   指摘を受けた（営業現場での実機テストより）。
-   そこで、各カテゴリについて実データ（構造化された列の値）だけで
-   白黒つけられる「お客様の必須条件」を定義し、それに明確に矛盾する製品
-   だけを「失格」として扱うようにした。
-   ここに定義がないカテゴリ（例：初期費用＝価格データが無く客観的に
-   判定できない）は、消去法問題を生成しない。
-------------------------------------------------------------- */
-// ※ reason()はすべて「〜ため、」に自然につながる中止形（プレーン形）で
-//   統一している。文末（「〜です/ません」）にすると呼び出し側で
-//   「ではありませんため」のような不自然な二重表現になるため。
-const PRACTICE_DISQUALIFIER_RULES = {
-  "停電対策": {
-    requirement: "停電時に家全体（全負荷）の電気を使いたい",
-    isDisqualified: (p) =>
-      !isUnknownValue(p.loadType) && /特定負荷/.test(p.loadType) && !/全負荷/.test(p.loadType),
-    reason: (p) => `負荷タイプが「${p.loadType}」で全負荷に対応しておらず、停電時に家全体を使いたいというご要望に応えられない`
-  },
-  "EV/V2H": {
-    requirement: "EV・V2H連携が必須",
-    isDisqualified: (p) => !isPositiveValue(p.v2h),
-    reason: (p) => `V2H対応が公式データ上「${isUnknownValue(p.v2h) ? "不明" : p.v2h}」であり、V2H連携を確約して提案するのは適切でない`
-  },
-  "保証・安心": {
-    requirement: "自然災害補償を含む長期の安心を重視",
-    isDisqualified: (p) => !isPositiveValue(p.disasterCompensation),
-    reason: (p) => `自然災害補償が公式データ上「${isUnknownValue(p.disasterCompensation) ? "不明" : p.disasterCompensation}」であり、災害時の補償を安心材料として断定的に伝えるのは適切でない`
-  },
-  "設置スペース": {
-    requirement: "設置スペースが限られており屋内設置も検討したい",
-    isDisqualified: (p) => !isUnknownValue(p.installation) && String(p.installation).trim() === "屋外設置",
-    reason: (p) => `設置条件が「${p.installation}」で屋内設置ができず、設置スペースが限られるお客様には提案しづらい`
-  },
-  "電気代削減": {
-    requirement: "太陽光の自家消費拡大で電気代を削減したい",
-    isDisqualified: (p) => !isPositiveValue(p.solarLink),
-    reason: (p) => `太陽光連携が公式データ上「${isUnknownValue(p.solarLink) ? "不明" : p.solarLink}」であり、自家消費による電気代削減を訴求する根拠が弱い`
-  }
-  // "初期費用"：価格帯のデータが無く客観的に判定できないため、あえて定義しない
-};
-
-// 実践提案問題（製品選択型）の解説文を組み立てる（5つの要素を必ず含める）
-function buildPracticeExplanation(correctP, wrongPs, category, rule) {
-  const parts = [];
-
-  // 1. なぜ正解か ＋ 2. 判断材料になったお客様条件
-  parts.push(
-    `正解は${correctP.maker}「${correctP.series}」です。` +
-    `お客様状況の「${stripOuterQuotes(correctP.suitableFamily)}」という条件が判断材料で、` +
-    `この製品はまさにそうした家庭に向いているとされています。`
-  );
-
-  // 3. 他の選択肢が弱い理由
-  const weakParts = wrongPs.map((wp) => describeWrongChoiceReason(wp, category, rule));
-  parts.push(`一方、${weakParts.join("。")}。`);
-
-  // 4. 営業時にどう伝えるか
-  if (!isUnknownValue(correctP.salesPoint)) {
-    parts.push(`営業時には「${stripOuterQuotes(correctP.salesPoint)}」という伝え方が効果的です。`);
-  }
-
-  // 5. 注意すべきデメリット・確認事項
-  if (!isUnknownValue(correctP.demerit)) {
-    parts.push(`ただし「${stripOuterQuotes(correctP.demerit)}」という注意点があるため、提案時に正直に説明し、事前確認を怠らないようにしましょう。`);
-  }
-
-  return parts.join("");
-}
-
-// 誤答（不向きな製品）を選んだ理由。客観的な失格条件（実データ上の矛盾）が
-// あればそれを優先し、なければデメリット、それも無ければ重視ポイントとの
-// 合致度で説明する。buildPracticeExplanationとchoiceExplanationsの両方で使う。
-function describeWrongChoiceReason(wp, category, rule) {
-  if (rule && rule.isDisqualified(wp)) {
-    return `${wp.maker}「${wp.series}」は${rule.reason(wp)}ため、この条件のお客様には明確に不向きです`;
-  }
-  if (!isUnknownValue(wp.demerit)) {
-    return `${wp.maker}「${wp.series}」は「${stripOuterQuotes(wp.demerit)}」という注意点があり、このお客様の最優先ニーズとはズレがあります`;
-  }
-  return `${wp.maker}「${wp.series}」は今回のお客様の重視ポイント（${PRACTICE_PRIORITY_LABEL[category] || category}）との合致度で一歩譲ります`;
-}
-
-// 「この選択肢はどんな場面なら有効か」を示す一文（誤答の製品自身の強みを紹介する）
-function describeWhenApplicable(wp) {
-  if (!isUnknownValue(wp.salesPoint)) {
-    return `この製品自体は「${stripOuterQuotes(wp.salesPoint)}」という強みがあり、条件が異なるお客様には有効な提案になり得ます。`;
-  }
-  if (!isUnknownValue(wp.merit)) {
-    return `この製品自体は「${stripOuterQuotes(wp.merit)}」というメリットがあり、条件が異なるお客様には有効な提案になり得ます。`;
-  }
-  return "お客様の状況によっては有効な提案になり得るため、条件を再確認しましょう。";
-}
-
-/* ---- 4-1. 製品選択型（Aパターン）：お客様状況→最適な製品を選ぶ ----
-   誤答（ダミー選択肢）は、客観的な失格条件（PRACTICE_DISQUALIFIER_RULES）を
-   満たす製品を優先的に採用する。定義済みカテゴリでは「なぜ他の選択肢が
-   不適切か」を実データの数値・文言で裏付けられるようになる。
-   ルールが無い／失格候補が足りないカテゴリは、従来通り「重視カテゴリが
-   違う製品」を補完的に使う（出題数を大きく減らさないため）。
-------------------------------------------------------------- */
-function genPracticeProductQuestions(products) {
-  const questions = [];
-
-  const withCat = products
-    .map((p) => ({ p, category: detectPracticeCategory(p) }))
-    .filter((x) => x.category !== null && !isUnknownValue(x.p.suitableFamily));
-
-  withCat.forEach(({ p, category }) => {
-    const rule = PRACTICE_DISQUALIFIER_RULES[category];
-    const others = withCat.filter((x) => x.p !== p);
-
-    const disqualifiedPool = rule ? others.filter((x) => rule.isDisqualified(x.p)) : [];
-    const fallbackPool = others.filter((x) => x.category !== category && !disqualifiedPool.includes(x));
-
-    let wrongs = pickRandomN(disqualifiedPool, Math.min(3, disqualifiedPool.length)).map((x) => x.p);
-    if (wrongs.length < 3) {
-      const filler = pickRandomN(fallbackPool, 3 - wrongs.length).map((x) => x.p);
-      wrongs = wrongs.concat(filler);
-    }
-    if (wrongs.length < 3) return;
-
-    const choices = shuffleArray([makerLabel(p), ...wrongs.map(makerLabel)]);
-
-    // 選択肢ごとの比較（正解/不正解・理由・営業判断のポイント）
-    const choiceExplanations = {};
-    choiceExplanations[makerLabel(p)] = {
-      result: "正解",
-      reason: `お客様状況の「${stripOuterQuotes(p.suitableFamily)}」という条件に最も合致します。`,
-      salesPoint: !isUnknownValue(p.salesPoint) ? stripOuterQuotes(p.salesPoint) : ""
-    };
-    wrongs.forEach((wp) => {
-      choiceExplanations[makerLabel(wp)] = {
-        result: "不正解",
-        reason: describeWrongChoiceReason(wp, category, rule) + "。",
-        salesPoint: describeWhenApplicable(wp)
-      };
-    });
-
-    questions.push({
-      id: nextQuestionId("p"),
-      mode: "practice",
-      category,
-      difficulty: "中級",
-      question: "次のお客様に最も提案しやすい蓄電池はどれ？",
-      customerScenario: {
-        "想定されるお客様": stripOuterQuotes(p.suitableFamily),
-        "重視していること": PRACTICE_PRIORITY_LABEL[category] || category
-      },
-      choices,
-      answer: makerLabel(p),
-      explanation: buildPracticeExplanation(p, wrongs, category, rule),
-      choiceExplanations,
-      sourceManufacturer: p.maker,
-      sourceProduct: p.series
-    });
-  });
-
-  return questions;
-}
-
-/* ---- 4-2. 営業トーク消去法（旧Bパターンを刷新）----
-   「最も響くトークを選ぶ」形式は、複数の訴求ポイントが同時に妥当に見え、
-   人によって解釈が割れやすいという指摘が最も多かった設問タイプ。
-   そこで「明らかに不適切な提案を1つ選ぶ」消去法形式に変更した。
-   正解（＝消去すべき1つ）は、客観的な失格条件（実データ上の矛盾）が
-   確認できる製品に限定する。失格条件を定義できる／該当製品があるときだけ
-   出題するため、「なぜこれが不正解か」を必ず実データで説明できる。
-------------------------------------------------------------- */
-function genPracticeTalkQuestions(products) {
-  const questions = [];
-
-  const withCat = products
-    .map((p) => ({ p, category: detectPracticeCategory(p) }))
-    .filter((x) => x.category !== null && !isUnknownValue(x.p.salesPoint));
-
-  withCat.forEach(({ p: baseP, category }) => {
-    const rule = PRACTICE_DISQUALIFIER_RULES[category];
-    if (!rule) return; // 客観的な失格条件を定義できないカテゴリは出題しない
-
-    // 実データ上、明確にお客様の必須条件と矛盾する製品（＝消去すべき選択肢）を探す
-    const disqualified = withCat.filter((x) => x.p !== baseP && rule.isDisqualified(x.p));
-    if (disqualified.length === 0) return;
-    const badPick = disqualified[Math.floor(Math.random() * disqualified.length)].p;
-
-    // 「明確な矛盾が無い」選択肢（消去法なので、ベストである必要はない）
-    const safeCandidates = withCat.filter(
-      (x) => x.p !== baseP && x.p !== badPick && !rule.isDisqualified(x.p)
-    );
-    if (safeCandidates.length < 2) return;
-    const safePicks = pickRandomN(safeCandidates, 2).map((x) => x.p);
-
-    const choiceProducts = shuffleArray([baseP, ...safePicks, badPick]);
-    const choices = choiceProducts.map((cp) => stripOuterQuotes(cp.salesPoint));
-    if (new Set(choices).size < 4) return; // 訴求ポイントの文言が重複する場合は出題しない
-
-    // 選択肢ごとの比較。この設問は「不適切なものを選ぶ」消去法なので、
-    // 失格製品(badPick)の訴求ポイントを選ぶことが「このクイズの正解」になる点に注意。
-    const choiceExplanations = {};
-    choiceProducts.forEach((cp) => {
-      const text = stripOuterQuotes(cp.salesPoint);
-      if (cp === badPick) {
-        choiceExplanations[text] = {
-          result: "正解",
-          reason: `このお客様は「${rule.requirement}」ことを必須条件としていますが、${cp.maker}「${cp.series}」は${rule.reason(cp)}ため、この訴求ポイントで断定的に提案するのは避けるべきです。`,
-          salesPoint: !isUnknownValue(cp.merit)
-            ? `この製品自体は「${stripOuterQuotes(cp.merit)}」という強みを持つため、条件が異なるお客様には有効な選択肢になり得ます。`
-            : "条件が異なるお客様には有効な選択肢になり得るため、要件を再確認しましょう。"
-        };
-      } else {
-        choiceExplanations[text] = {
-          result: "不正解",
-          reason: `${cp.maker}「${cp.series}」は公式データ上「${rule.requirement}」という必須条件と明確に矛盾する情報がないため、この訴求ポイントで提案すること自体は問題ありません。`,
-          salesPoint: "そのため「明らかに不適切な提案」には該当せず、今回の設問では不正解の選択肢です。"
-        };
-      }
-    });
-
-    questions.push({
-      id: nextQuestionId("p"),
-      mode: "practice",
-      category: "営業トーク判断",
-      difficulty: "上級",
-      question: "次のうち、このお客様への提案として明らかに不適切なものはどれ？",
-      customerScenario: {
-        "想定されるお客様": stripOuterQuotes(baseP.suitableFamily) || rule.requirement,
-        "必須条件": rule.requirement
-      },
-      choices,
-      answer: stripOuterQuotes(badPick.salesPoint),
-      explanation: buildTalkEliminationExplanation(badPick, rule),
-      choiceExplanations,
-      sourceManufacturer: badPick.maker,
-      sourceProduct: badPick.series
-    });
-  });
-
-  return questions;
-}
-
-// 営業トーク消去法問題の解説文（不適切と判断できる根拠を実データで示す）
-function buildTalkEliminationExplanation(badP, rule) {
-  const parts = [];
-
-  parts.push(
-    `不適切なのは${badP.maker}「${badP.series}」の訴求ポイントです。` +
-    `このお客様は「${rule.requirement}」ことを必須条件としていますが、` +
-    `${badP.maker}「${badP.series}」は${rule.reason(badP)}。`
-  );
-
-  parts.push(
-    "他の3つの選択肢は、いずれも公式データ上この必須条件と明確に矛盾する情報がないため、状況に応じて提案しうる訴求ポイントです。"
-  );
-
-  if (!isUnknownValue(badP.merit)) {
-    parts.push(
-      `なお${badP.maker}「${badP.series}」自体は「${stripOuterQuotes(badP.merit)}」という別の強みを持つ製品なので、条件が異なるお客様には十分な選択肢になり得ます。`
-    );
-  }
-
-  parts.push(
-    "営業時には、訴求ポイントの魅力だけで即決せず、必ず対象製品の仕様がお客様の必須条件を満たすかを確認してから伝えることが重要です。"
-  );
-
-  return parts.join("");
-}
-
-function generatePracticeQuestions(products) {
-  return genPracticeProductQuestions(products).concat(genPracticeTalkQuestions(products));
-}
-
-
-/* ================================================================
-   [パート5] 画面制御・クイズ進行ロジック（アプリ本体）
+   [パート2] 画面制御・クイズ進行ロジック（アプリ本体）
    ================================================================ */
 
 // カテゴリの表示順（データに存在するものだけが実際に表示される）
@@ -988,23 +102,26 @@ let newStreakRecordThisSession = false;
 
 let knowledgeQuestions = [];
 let practiceQuestions = [];
-let loadedProducts = [];
 
 
 /* ================================================================
-   [パート6] ユーザー管理・成績のlocalStorage保存
+   [パート3] ユーザー管理（ユーザー名＋PIN・Supabase RPC経由）
    ----------------------------------------------------------------
-   ・自己ベスト・連続正解数・不正解問題リストなどの成績は、
-     ユーザー名ごとに batteryQuizUser_<ユーザーID> というキーで
-     localStorageに保存する（他のユーザーの記録とは混ざらない）
-   ・保存データが無い・壊れている場合でもアプリが落ちないよう、
-     読み込み時に必ず正しい形へ正規化する
+   ・自己ベスト・連続正解数・不正解/正解済みリストは、Supabaseの
+     users / answer_history テーブルに保存される（ユーザー名＋PINで
+     識別。他人が同じ名前を使ってもPINが違えばログインできない）
+   ・「現在の不正解/正解済みリスト」は、answer_historyの各問題ごとの
+     最新の回答結果から毎回計算し直す（サーバー側のrpc_get_answer_status）。
+     ローカルに保存する情報はなく、ユーザー名＋PINさえ分かれば
+     どの端末・ブラウザからでも同じ記録にアクセスできる。
    ================================================================ */
 
-const USER_STORAGE_PREFIX = "batteryQuizUser_";
-const LAST_USER_KEY = "batteryQuiz_lastUserId";
+// 次回のユーザー名入力を補完するためだけに使う（PINは保存しない）
+const LAST_USERNAME_KEY = "batteryQuiz_lastUsername";
 
 // 現在ログイン中のユーザーの成績データ（ユーザー未確定の間はnull）
+// { id, userName, bestScore, bestRate, currentStreak, bestStreak,
+//   totalAnswered, totalCorrect, wrongQuestionIds: [], correctQuestionIds: [] }
 let currentUserRecord = null;
 
 // localStorageの読み書きはブラウザ設定等で失敗することがあるため、
@@ -1024,69 +141,6 @@ function safeLocalStorageSet(key, value) {
   }
 }
 
-// ユーザー名からlocalStorageキー用のユーザーIDを作る（空欄は「ゲスト」扱い）
-function sanitizeUserId(name) {
-  const trimmed = String(name || "").trim();
-  return trimmed === "" ? "guest" : trimmed;
-}
-
-function getDefaultUserRecord(userId, userName) {
-  return {
-    userId,
-    userName,
-    bestScore: 0,
-    bestRate: 0,
-    currentStreak: 0,
-    bestStreak: 0,
-    totalAnswered: 0,
-    totalCorrect: 0,
-    wrongQuestionIds: [],
-    correctQuestionIds: [],
-    history: []
-  };
-}
-
-// 保存データが壊れていたり、古い形式で欠けている項目があっても、
-// 必ず正しい型に補正したレコードを返す（＝初期化できる）
-function normalizeUserRecord(raw, userId, userName) {
-  const base = getDefaultUserRecord(userId, userName);
-  if (!raw || typeof raw !== "object") return base;
-
-  const num = (v) => (typeof v === "number" && isFinite(v) ? v : 0);
-  const idList = (v) => (Array.isArray(v) ? v.filter((id) => typeof id === "string") : []);
-
-  return {
-    userId,
-    userName: typeof raw.userName === "string" && raw.userName ? raw.userName : userName,
-    bestScore: num(raw.bestScore),
-    bestRate: num(raw.bestRate),
-    currentStreak: num(raw.currentStreak),
-    bestStreak: num(raw.bestStreak),
-    totalAnswered: num(raw.totalAnswered),
-    totalCorrect: num(raw.totalCorrect),
-    wrongQuestionIds: idList(raw.wrongQuestionIds),
-    correctQuestionIds: idList(raw.correctQuestionIds),
-    history: Array.isArray(raw.history) ? raw.history : []
-  };
-}
-
-function loadUserRecord(userId, userName) {
-  const raw = safeLocalStorageGet(USER_STORAGE_PREFIX + userId);
-  if (!raw) return getDefaultUserRecord(userId, userName);
-  try {
-    return normalizeUserRecord(JSON.parse(raw), userId, userName);
-  } catch (e) {
-    // JSONとして壊れている場合は初期状態として扱う
-    return getDefaultUserRecord(userId, userName);
-  }
-}
-
-function saveUserRecord(record) {
-  if (!record) return;
-  safeLocalStorageSet(USER_STORAGE_PREFIX + record.userId, JSON.stringify(record));
-  safeLocalStorageSet(LAST_USER_KEY, record.userId);
-}
-
 function addToListUnique(list, id) {
   if (!list.includes(id)) list.push(id);
 }
@@ -1095,84 +149,89 @@ function removeFromList(list, id) {
   if (idx !== -1) list.splice(idx, 1);
 }
 
-// スプレッドシートの更新等で問題IDの構成が変わっても、
-// 存在しない問題IDが不正解/正解済みリストに残ってエラーの原因にならないようにする
-function pruneWrongQuestionIds(record) {
-  if (!record) return;
-  const validIds = new Set(knowledgeQuestions.concat(practiceQuestions).map((q) => q.id));
-  const beforeWrong = record.wrongQuestionIds.length;
-  const beforeCorrect = record.correctQuestionIds.length;
-  record.wrongQuestionIds = record.wrongQuestionIds.filter((id) => validIds.has(id));
-  record.correctQuestionIds = record.correctQuestionIds.filter((id) => validIds.has(id));
-  if (record.wrongQuestionIds.length !== beforeWrong || record.correctQuestionIds.length !== beforeCorrect) {
-    saveUserRecord(record);
-  }
+// ユーザー名＋PINでログインする（未登録の名前ならそのPINで新規登録される）。
+// 失敗（PIN不一致など）時は例外を投げるので、呼び出し側でメッセージ表示する。
+async function loginUser(username, pin) {
+  const rows = await supabaseRpc("rpc_login", { p_username: username, p_pin: pin });
+  const row = rows[0];
+
+  const statusRows = await supabaseRpc("rpc_get_answer_status", { p_user_id: row.id });
+
+  return {
+    id: row.id,
+    userName: row.username,
+    bestScore: row.best_score,
+    bestRate: row.best_rate,
+    currentStreak: row.current_streak,
+    bestStreak: row.best_streak,
+    totalAnswered: row.total_answered,
+    totalCorrect: row.total_correct,
+    wrongQuestionIds: statusRows.filter((r) => !r.correct).map((r) => r.question_id),
+    correctQuestionIds: statusRows.filter((r) => r.correct).map((r) => r.question_id)
+  };
 }
 
-// 1問回答するたびに呼ぶ：不正解/正解済みリストの追加・削除、連続正解数・累計を更新する
-// （通常モードでも「不正解問題」「正解問題」復習モードでも、ルールは共通）。
+// 1問回答するたびに呼ぶ。通信の完了を待たずに画面が反応できるよう、
+// 不正解/正解済みリストはこちら側でも即座に更新する（楽観的更新）。
+// 連続正解数・累計はサーバー側の計算結果（RPCの戻り値）を正として上書きする。
 // 各問題は常に「直近の回答結果」だけを反映するよう、2つのリストは排他的にする。
-//   ・正解 → 不正解リストから削除、正解済みリストに追加、連続正解+1
-//   ・不正解 → 正解済みリストから削除、不正解リストに追加、連続正解は0にリセット
-function recordAnswerForUser(question, isCorrect) {
+async function recordAnswerForUser(question, isCorrect) {
   if (!currentUserRecord) return;
   const record = currentUserRecord;
 
-  record.totalAnswered++;
-
   if (isCorrect) {
-    record.totalCorrect++;
-    record.currentStreak++;
-    if (record.currentStreak > record.bestStreak) {
-      record.bestStreak = record.currentStreak;
-      newStreakRecordThisSession = true;
-    }
     removeFromList(record.wrongQuestionIds, question.id);
     addToListUnique(record.correctQuestionIds, question.id);
   } else {
-    record.currentStreak = 0;
     addToListUnique(record.wrongQuestionIds, question.id);
     removeFromList(record.correctQuestionIds, question.id);
   }
 
-  saveUserRecord(record);
+  try {
+    const rows = await supabaseRpc("rpc_record_answer", {
+      p_user_id: record.id,
+      p_question_id: question.id,
+      p_correct: isCorrect,
+      p_mode: question.mode,
+      p_category: question.category
+    });
+    const row = rows[0];
+    record.currentStreak = row.current_streak;
+    if (row.best_streak > record.bestStreak) {
+      record.bestStreak = row.best_streak;
+      newStreakRecordThisSession = true;
+    }
+    record.totalAnswered = row.total_answered;
+    record.totalCorrect = row.total_correct;
+  } catch (err) {
+    // ネットワーク不調等で保存に失敗しても、その場のクイズ体験は止めない
+    console.error("回答の記録に失敗しました:", err.message);
+  }
 }
 
-// セッション終了時（結果画面表示時）に呼ぶ：自己ベスト・履歴を更新する。
-// 戻り値：このセッションで何らかの自己ベストを更新できたか
-function recordSessionResultForUser(total, correctCount, rate) {
-  if (!currentUserRecord) return false;
-  const record = currentUserRecord;
-  let isNewRecord = newStreakRecordThisSession;
-
-  if (correctCount > record.bestScore) {
-    record.bestScore = correctCount;
-    isNewRecord = true;
+// セッション終了時（結果画面表示時）に呼ぶ：自己ベストをサーバーに保存する。
+// 通信を待たずに結果画面の演出を出したいので、呼び出し側では await せず
+// 発火するだけにする（＝fire-and-forget。失敗してもこの関数内でログするのみ）。
+async function recordSessionResultForUser(userId, correctCount, rate) {
+  try {
+    await supabaseRpc("rpc_record_session_result", {
+      p_user_id: userId,
+      p_score: correctCount,
+      p_rate: rate
+    });
+  } catch (err) {
+    console.error("自己ベストの保存に失敗しました:", err.message);
   }
-  if (rate > record.bestRate) {
-    record.bestRate = rate;
-    isNewRecord = true;
-  }
+}
 
-  record.history.push({
-    date: new Date().toISOString().slice(0, 10),
-    mode: state.mode,
-    category: state.category,
-    total,
-    correct: correctCount,
-    rate
-  });
-  if (record.history.length > 50) {
-    record.history = record.history.slice(-50); // 履歴が際限なく増えないようにする
-  }
-
-  saveUserRecord(record);
-  return isNewRecord;
+// ランキング（全ユーザー横断）を取得する
+async function fetchRanking() {
+  return supabaseRpc("rpc_get_ranking", {});
 }
 
 
 /* ================================================================
-   [パート7] 演出・効果音（ゲーム的な楽しさのための仕掛け）
+   [パート4] 演出・効果音（ゲーム的な楽しさのための仕掛け）
    ----------------------------------------------------------------
    ・正解/不正解を選択肢の色でその場でフィードバック
    ・連続正解（ストリーク）をトースト通知＋紙吹雪で盛り上げる
@@ -1370,56 +429,74 @@ async function initApp() {
 
 // ---- ユーザー入力画面 ----
 function setupUserScreen() {
-  const input = document.getElementById("username-input");
+  const nameInput = document.getElementById("username-input");
+  const pinInput = document.getElementById("pin-input");
 
-  // 前回使ったユーザー名があれば入力欄に補完しておく（開始は必ずボタン操作で確定）
-  const lastUserId = safeLocalStorageGet(LAST_USER_KEY);
-  if (lastUserId) {
-    const lastRecord = loadUserRecord(lastUserId, lastUserId);
-    input.value = lastRecord.userName || lastUserId;
-  }
+  // 前回使ったユーザー名だけ補完しておく（PINはセキュリティ上保存せず毎回入力）
+  const lastUsername = safeLocalStorageGet(LAST_USERNAME_KEY);
+  if (lastUsername) nameInput.value = lastUsername;
 
   document.getElementById("btn-user-start").addEventListener("click", () => {
-    startAsUser(input.value);
+    startAsUser(nameInput.value, pinInput.value);
   });
-  input.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") startAsUser(input.value);
+  pinInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") startAsUser(nameInput.value, pinInput.value);
   });
 
   document.getElementById("btn-switch-user").addEventListener("click", () => {
+    pinInput.value = "";
+    document.getElementById("username-warning").textContent = "";
     showScreen("screen-user");
   });
 }
 
-// 入力されたユーザー名でログインし、そのユーザー専用の成績データを読み込む
-function startAsUser(rawName) {
-  const trimmed = String(rawName || "").trim();
-  if (!trimmed) {
-    document.getElementById("username-warning").textContent = "ユーザー名を入力してください。";
+// 入力されたユーザー名＋PINでログインし（未登録ならそのPINで新規登録）、
+// そのユーザー専用の成績データをSupabaseから読み込む
+async function startAsUser(rawName, rawPin) {
+  const trimmedName = String(rawName || "").trim();
+  const trimmedPin = String(rawPin || "").trim();
+  const warningEl = document.getElementById("username-warning");
+
+  if (!trimmedName) {
+    warningEl.textContent = "ユーザー名を入力してください。";
     return;
   }
-  document.getElementById("username-warning").textContent = "";
+  if (!/^\d{4,}$/.test(trimmedPin)) {
+    warningEl.textContent = "PINは4桁以上の数字で入力してください。";
+    return;
+  }
 
-  const userId = sanitizeUserId(trimmed);
-  currentUserRecord = loadUserRecord(userId, trimmed);
-  saveUserRecord(currentUserRecord); // 初回でも記録が存在する状態にしておく
-  pruneWrongQuestionIds(currentUserRecord);
+  const startBtn = document.getElementById("btn-user-start");
+  warningEl.textContent = "ログイン中…";
+  startBtn.disabled = true;
 
-  document.getElementById("current-user-label").textContent = `ユーザー：${currentUserRecord.userName}`;
-  renderBestRecordOnStart();
-  updateDataStatusDetail();
-  if (state.mode) populateCategorySelect(); // 「不正解問題」カテゴリの有無を再評価する
-  validateStartButton();
+  try {
+    currentUserRecord = await loginUser(trimmedName, trimmedPin);
+    safeLocalStorageSet(LAST_USERNAME_KEY, trimmedName);
 
-  showScreen("screen-start");
+    warningEl.textContent = "";
+    document.getElementById("current-user-label").textContent = `ユーザー：${currentUserRecord.userName}`;
+    renderBestRecordOnStart();
+    updateDataStatusDetail();
+    if (state.mode) populateCategorySelect(); // 「不正解問題」「正解問題」カテゴリの有無を再評価する
+    validateStartButton();
+
+    showScreen("screen-start");
+  } catch (err) {
+    warningEl.textContent = err.message || "ログインに失敗しました。もう一度お試しください。";
+  } finally {
+    startBtn.disabled = false;
+  }
 }
 
-// スプレッドシートからデータを読み込み、問題を生成する
+// Supabaseの questions テーブルから、事前生成済みの問題を読み込む。
+// スプレッドシート自体はもう直接読みに行かない
+// （scripts/sync-questions.js が定期的にSupabaseへ反映する運用）。
 async function loadAllData() {
   const statusText = document.getElementById("data-status-text");
   const reloadBtn = document.getElementById("btn-reload-data");
 
-  statusText.textContent = "スプレッドシートからデータを読み込み中…";
+  statusText.textContent = "問題データを読み込み中…";
   statusText.className = "status-loading";
   reloadBtn.hidden = true;
   state.dataLoaded = false;
@@ -1427,53 +504,57 @@ async function loadAllData() {
   updateDataStatusDetail();
 
   try {
-    // SHEET_CONFIGの全シートを読み込む（現状は蓄電池シートのみ）
-    knowledgeQuestions = [];
-    practiceQuestions = [];
-    loadedProducts = [];
-    questionIdCounter = 1;
-
-    for (const conf of SHEET_CONFIG) {
-      const products = await loadProductsFromSheet(conf);
-      if (conf.type === "battery") {
-        loadedProducts = loadedProducts.concat(products);
-        knowledgeQuestions = knowledgeQuestions.concat(generateKnowledgeQuestions(products));
-        practiceQuestions = practiceQuestions.concat(generatePracticeQuestions(products));
-      }
-      // 将来の拡張：typeが増えたらここに分岐を追加する
-      // else if (conf.type === "subsidy") { ... 補助金シート用の生成関数 ... }
+    const res = await supabaseFetch("questions?select=*");
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}`);
     }
+    const rows = await res.json();
 
-    if (loadedProducts.length === 0) {
+    if (rows.length === 0) {
       statusText.textContent =
-        "スプレッドシートにまだデータがありません。リサーチ結果をシートに貼り付けてから「再読み込み」を押してください。";
+        "問題データがまだありません。scripts/sync-questions.js を実行してSupabaseに問題を登録してください。";
       statusText.className = "status-warning";
       reloadBtn.hidden = false;
       return;
     }
 
-    statusText.textContent = "スプレッドシート読み込み済み";
+    knowledgeQuestions = rows.filter((r) => r.mode === "knowledge").map(questionFromRow);
+    practiceQuestions = rows.filter((r) => r.mode === "practice").map(questionFromRow);
+
+    statusText.textContent = "問題データ読み込み済み";
     statusText.className = "status-ok";
     reloadBtn.hidden = false;
     state.dataLoaded = true;
     validateStartButton();
-
-    // 問題データの構成が変わった可能性があるので、存在しない不正解IDを掃除する
-    if (currentUserRecord) pruneWrongQuestionIds(currentUserRecord);
     updateDataStatusDetail();
 
     // モード選択済みならカテゴリ一覧を更新する
     if (state.mode) populateCategorySelect();
   } catch (err) {
-    // file:// で開いた場合のCORSエラーもここに来る
-    const isFileProtocol = location.protocol === "file:";
-    statusText.textContent = isFileProtocol
-      ? "読み込みに失敗しました。file:// で直接開くとスプレッドシートを取得できません。ローカルサーバー経由（http://localhost/...）で開いてください（READMEの実行手順参照）。"
-      : `読み込みに失敗しました：${err.message}。共有設定（リンクを知っている全員が閲覧可）とネット接続を確認して「再読み込み」を押してください。`;
+    statusText.textContent =
+      `読み込みに失敗しました：${err.message}。ネット接続を確認して「再読み込み」を押してください。`;
     statusText.className = "status-error";
     reloadBtn.hidden = false;
     updateDataStatusDetail();
   }
+}
+
+// questionsテーブルの行（snake_case）→ アプリ内部の問題オブジェクト（camelCase）に変換
+function questionFromRow(row) {
+  return {
+    id: row.id,
+    mode: row.mode,
+    category: row.category,
+    difficulty: row.difficulty,
+    question: row.question,
+    customerScenario: row.customer_scenario || "",
+    choices: row.choices,
+    answer: row.answer,
+    explanation: row.explanation,
+    choiceExplanations: row.choice_explanations || {},
+    sourceManufacturer: row.source_manufacturer,
+    sourceProduct: row.source_product
+  };
 }
 
 // データ読み込み状況の詳細（問題数の内訳・不正解リスト数）を
@@ -1544,6 +625,65 @@ function setupStartScreen() {
   document.getElementById("btn-next").addEventListener("click", goToNextQuestion);
   document.getElementById("btn-restart").addEventListener("click", resetToStart);
   document.getElementById("btn-review-wrong").addEventListener("click", startReviewSession);
+
+  document.getElementById("btn-show-ranking").addEventListener("click", () => {
+    showScreen("screen-ranking");
+    renderRankingScreen();
+  });
+  document.getElementById("btn-ranking-back").addEventListener("click", () => {
+    showScreen("screen-start");
+  });
+}
+
+// ランキング画面の描画（全ユーザー横断。ユーザー名以外の個人情報は表示しない）
+async function renderRankingScreen() {
+  const listEl = document.getElementById("ranking-list");
+  const emptyEl = document.getElementById("ranking-empty-text");
+  const errorEl = document.getElementById("ranking-error-text");
+
+  listEl.innerHTML = "";
+  emptyEl.hidden = true;
+  errorEl.hidden = true;
+
+  try {
+    const rows = await fetchRanking();
+
+    if (rows.length === 0) {
+      emptyEl.hidden = false;
+      return;
+    }
+
+    rows.forEach((row, idx) => {
+      const item = document.createElement("div");
+      item.className = "ranking-row" + (idx < 3 ? " is-top3" : "");
+
+      const rank = document.createElement("span");
+      rank.className = "ranking-rank";
+      rank.textContent = `${idx + 1}`;
+
+      const name = document.createElement("span");
+      name.className = "ranking-name";
+      name.textContent = row.username;
+
+      const stats = document.createElement("span");
+      stats.className = "ranking-stats";
+      const bEl = document.createElement("b");
+      bEl.textContent = `正答率 ${row.best_rate}%`;
+      stats.appendChild(bEl);
+      stats.appendChild(document.createElement("br"));
+      stats.appendChild(document.createTextNode(
+        `正答数 ${row.best_score}問 ／ 連続 ${row.current_streak}問（最高${row.best_streak}問） ／ 累計 ${row.total_answered}問`
+      ));
+
+      item.appendChild(rank);
+      item.appendChild(name);
+      item.appendChild(stats);
+      listEl.appendChild(item);
+    });
+  } catch (err) {
+    errorEl.textContent = `ランキングの取得に失敗しました：${err.message}`;
+    errorEl.hidden = false;
+  }
 }
 
 // カテゴリ一覧は「実際に生成された問題」から動的に作る。
@@ -1804,7 +944,13 @@ function submitAnswer() {
     }
   });
 
-  // ユーザーごとの記録（不正解リスト・連続正解・累計）を更新する
+  // 連続正解数はサーバーへの通信を待たずにその場で楽観的に更新し、
+  // 音・トースト・紙吹雪の演出がすぐに出るようにする。
+  // 実際の保存（不正解/正解済みリスト・サーバー側の集計）は非同期で進める
+  // （recordAnswerForUser内でPromiseの失敗もキャッチ済みなのでawait不要）。
+  if (currentUserRecord) {
+    currentUserRecord.currentStreak = isCorrect ? currentUserRecord.currentStreak + 1 : 0;
+  }
   recordAnswerForUser(q, isCorrect);
   updateStreakBadge();
 
@@ -1939,8 +1085,20 @@ function renderResultScreen() {
   document.getElementById("result-knowledge-rate").textContent = formatRate(knowledgeAnswers);
   document.getElementById("result-practice-rate").textContent = formatRate(practiceAnswers);
 
-  // セッション終了時点の自己ベスト更新チェック＆履歴の記録
-  const isNewRecord = recordSessionResultForUser(total, correctCount, rate);
+  // 自己ベスト更新チェックはローカルで即座に行い（通信を待たず演出を出す）、
+  // サーバーへの保存は非同期で進める（fire-and-forget）
+  let isNewRecord = newStreakRecordThisSession;
+  if (currentUserRecord) {
+    if (correctCount > currentUserRecord.bestScore) {
+      currentUserRecord.bestScore = correctCount;
+      isNewRecord = true;
+    }
+    if (rate > currentUserRecord.bestRate) {
+      currentUserRecord.bestRate = rate;
+      isNewRecord = true;
+    }
+    recordSessionResultForUser(currentUserRecord.id, correctCount, rate);
+  }
   document.getElementById("new-record-banner").hidden = !isNewRecord;
 
   // 高得点・自己ベスト更新時は紙吹雪でお祝いする
