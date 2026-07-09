@@ -49,11 +49,21 @@ body {
 /* ダイブ画面（ログイン画面）表示中は、上下左右のスワイプでページ自体が
    動く（＝端末のラバーバンド／オーバースクロールで背景の白が見えてしまう）
    のを防ぐため、スクロール自体を止める。showScreen()でscreen-userが
-   アクティブな間だけhtml/bodyへこのクラスを付与する */
-html.dive-active, body.dive-active {
+   アクティブな間だけhtml/bodyへこのクラスを付与する。
+   overflow:hiddenだけだとスマホのソフトキーボード表示・非表示のたびに
+   ビューポートが変化し、キーボードを閉じた後もUIが上にずれたまま
+   固定されてしまう端末があったため、position:fixedで完全に固定する
+   （＝スクロール位置という概念自体をなくす、より確実な手法） */
+html.dive-active {
   overflow: hidden;
   overscroll-behavior: none;
-  height: 100%;
+}
+body.dive-active {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
   background: var(--color-bg);
 }
 
@@ -461,7 +471,10 @@ html.dive-active, body.dive-active {
 .dive-screen {
   position: relative;
   z-index: 1;
+  /* 100dvhに対応するブラウザでは、ソフトキーボードの表示/非表示による
+     ビューポート変化に追従できるdvhを優先する（非対応環境は100vhにフォールバック） */
   min-height: calc(100vh - 64px);
+  min-height: calc(100dvh - 64px);
   text-align: center;
   color: var(--color-text);
 }
@@ -833,27 +846,63 @@ html.dive-active, body.dive-active {
   border-radius: 10px;
   background: rgba(34, 227, 255, 0.04);
   border: 1.5px solid var(--color-border);
+  transition: padding 0.15s ease;
 }
-.ranking-row.is-top3 {
-  border-color: var(--color-accent);
-  background: rgba(255, 49, 216, 0.08);
-  box-shadow: 0 0 14px rgba(255, 49, 216, 0.15);
+/* 1位=金・2位=銀・3位=銅のふち色で、視覚的に順位が分かるようにする */
+.ranking-row.rank-gold {
+  border-color: #f2c94c;
+  background: rgba(242, 201, 76, 0.1);
+  box-shadow: 0 0 18px rgba(242, 201, 76, 0.3);
 }
+.ranking-row.rank-gold .ranking-rank { color: #f2c94c; }
+.ranking-row.rank-silver {
+  border-color: #cfd8e6;
+  background: rgba(207, 216, 230, 0.08);
+  box-shadow: 0 0 14px rgba(207, 216, 230, 0.22);
+}
+.ranking-row.rank-silver .ranking-rank { color: #cfd8e6; }
+.ranking-row.rank-bronze {
+  border-color: #cd7f32;
+  background: rgba(205, 127, 50, 0.12);
+  box-shadow: 0 0 14px rgba(205, 127, 50, 0.28);
+}
+.ranking-row.rank-bronze .ranking-rank { color: #cd7f32; }
+
+/* カードの大きさは1→2→3→4位の順に小さくし、4位以降はすべて同じ最小サイズにする */
+.ranking-row.rank-size-1 { padding: 16px 16px; }
+.ranking-row.rank-size-1 .ranking-rank { width: 34px; font-size: 1.3rem; }
+.ranking-row.rank-size-1 .ranking-name { font-size: 1.1rem; }
+.ranking-row.rank-size-1 .ranking-stats { padding-left: 46px; font-size: 0.86rem; }
+
+.ranking-row.rank-size-2 { padding: 13px 14px; }
+.ranking-row.rank-size-2 .ranking-rank { width: 31px; font-size: 1.12rem; }
+.ranking-row.rank-size-2 .ranking-name { font-size: 1.02rem; }
+.ranking-row.rank-size-2 .ranking-stats { padding-left: 43px; font-size: 0.83rem; }
+
+.ranking-row.rank-size-3 { padding: 11px 13px; }
+.ranking-row.rank-size-3 .ranking-rank { width: 29px; font-size: 1.02rem; }
+.ranking-row.rank-size-3 .ranking-name { font-size: 0.96rem; }
+.ranking-row.rank-size-3 .ranking-stats { padding-left: 41px; font-size: 0.81rem; }
+
+.ranking-row.rank-size-4 { padding: 10px 12px; }
+.ranking-row.rank-size-4 .ranking-rank { width: 28px; font-size: 1rem; }
+.ranking-row.rank-size-4 .ranking-name { font-size: 0.92rem; }
+.ranking-row.rank-size-4 .ranking-stats { padding-left: 40px; font-size: 0.8rem; }
+
 .ranking-rank {
   flex: none;
   width: 28px;
   font-weight: bold;
   text-align: center;
   color: var(--color-muted);
-}
-.ranking-row.is-top3 .ranking-rank {
-  color: var(--color-accent);
+  transition: width 0.15s ease, font-size 0.15s ease;
 }
 .ranking-name {
   flex: 1 1 auto;
   min-width: 0;
   font-weight: bold;
   overflow-wrap: anywhere;
+  transition: font-size 0.15s ease;
 }
 .ranking-stats {
   flex: 1 1 100%;
@@ -864,6 +913,7 @@ html.dive-active, body.dive-active {
   color: var(--color-muted);
   line-height: 1.5;
   overflow-wrap: anywhere;
+  transition: padding-left 0.15s ease, font-size 0.15s ease;
 }
 .ranking-stats b {
   color: var(--color-primary-dark);
@@ -1663,23 +1713,34 @@ html.dive-active, body.dive-active {
   margin: 0 0 12px;
   animation: correct-pop 0.5s ease;
 }
+/* 5つの数値を横一列に詰め込むと区切りが分かりづらくなるため、
+   タイルごとに背景・枠を付けたグリッドにして視覚的に分離する */
 .result-summary {
-  display: flex;
-  justify-content: space-around;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(82px, 1fr));
+  gap: 8px;
   text-align: center;
 }
 .result-stat {
   display: flex;
   flex-direction: column;
+  gap: 2px;
+  padding: 10px 4px;
+  border-radius: 10px;
+  background: rgba(34, 227, 255, 0.05);
+  border: 1px solid var(--color-border);
 }
 .result-stat-value {
-  font-size: 2rem;
+  font-size: 1.35rem;
   font-weight: bold;
   color: var(--color-primary);
+  text-shadow: 0 0 10px rgba(34, 227, 255, 0.35);
+  white-space: nowrap;
 }
 .result-stat-label {
   color: var(--color-muted);
-  font-size: 0.85rem;
+  font-size: 0.68rem;
+  white-space: nowrap;
 }
 .result-breakdown {
   display: flex;

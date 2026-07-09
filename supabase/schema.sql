@@ -564,6 +564,23 @@ as $$
   limit 100;
 $$;
 
+create or replace function rpc_get_monthly_ranking()
+returns table (username text, monthly_correct int, monthly_answered int, level int, total_exp int)
+language sql
+security definer
+as $$
+  select u.username,
+         count(*) filter (where ah.correct)::int as monthly_correct,
+         count(*)::int as monthly_answered,
+         u.level, u.total_exp
+  from answer_history ah
+  join users u on u.id = ah.user_id
+  where ah.answered_at >= now() - interval '30 days'
+  group by u.id, u.username, u.level, u.total_exp
+  order by monthly_correct desc, monthly_answered desc
+  limit 100;
+$$;
+
 create or replace function rpc_get_combo_ranking()
 returns table (username text, best_streak int, level int, total_exp int)
 language sql

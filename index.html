@@ -7,7 +7,7 @@
 <!-- style.css / script.js を編集したら ?v= の数字を必ず増やすこと。
      増やさないと、ブラウザにキャッシュされた古いファイルが
      読み込まれ続け、コード修正がユーザーの端末に反映されないため。 -->
-<link rel="stylesheet" href="style.css?v=16">
+<link rel="stylesheet" href="style.css?v=18">
 </head>
 <body>
 
@@ -233,12 +233,13 @@
   <section id="screen-ranking" class="screen">
     <header class="app-header">
       <h1>攻略者ボード</h1>
-      <p id="ranking-sub" class="app-sub">制圧率が高い順に表示しています（上位100名）</p>
+      <p id="ranking-sub" class="app-sub">正答率が高い順に表示しています（上位100名）</p>
     </header>
 
     <div class="ranking-tabs" id="ranking-tabs">
       <button type="button" class="ranking-tab-btn selected" data-ranking="overall">総合</button>
       <button type="button" class="ranking-tab-btn" data-ranking="weekly">今週</button>
+      <button type="button" class="ranking-tab-btn" data-ranking="monthly">今月</button>
       <button type="button" class="ranking-tab-btn" data-ranking="combo">コンボ</button>
       <button type="button" class="ranking-tab-btn" data-ranking="suppression">正答率</button>
       <button type="button" class="ranking-tab-btn" data-ranking="missions">任務数</button>
@@ -350,7 +351,7 @@
       </div>
       <div class="result-stat">
         <span class="result-stat-value" id="result-rate"></span>
-        <span class="result-stat-label">制圧率</span>
+        <span class="result-stat-label">正答率</span>
       </div>
       <div class="result-stat">
         <span class="result-stat-value" id="result-score"></span>
@@ -358,7 +359,7 @@
       </div>
       <div class="result-stat">
         <span class="result-stat-value" id="result-damage-count"></span>
-        <span class="result-stat-label">被弾数</span>
+        <span class="result-stat-label">失敗数</span>
       </div>
       <div class="result-stat">
         <span class="result-stat-value" id="result-max-combo"></span>
@@ -420,7 +421,7 @@
     </div>
 
     <div class="card">
-      <h3 class="card-title">被弾ログ（今回分）</h3>
+      <h3 class="card-title">失敗ログ（今回分）</h3>
       <ul id="wrong-list" class="wrong-list"></ul>
       <p id="no-wrong-text" class="muted-text" hidden>無傷で任務完了！</p>
     </div>
@@ -431,6 +432,6 @@
 
 </div>
 
-<script src="script.js?v=21"></script>
+<script src="script.js?v=22"></script>
 </body>
 </html>

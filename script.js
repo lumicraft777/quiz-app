@@ -726,6 +726,7 @@ async function fetchRanking() {
 const RANKING_FETCHERS = {
   overall: () => supabaseRpc("rpc_get_ranking", {}),
   weekly: () => supabaseRpc("rpc_get_weekly_ranking", {}),
+  monthly: () => supabaseRpc("rpc_get_monthly_ranking", {}),
   combo: () => supabaseRpc("rpc_get_combo_ranking", {}),
   suppression: () => supabaseRpc("rpc_get_suppression_ranking", {}),
   missions: () => supabaseRpc("rpc_get_mission_count_ranking", {}),
@@ -843,6 +844,21 @@ function playStreakSound(streak) {
 function playFanfare() {
   const notes = [523.25, 659.25, 783.99, 1046.5];
   notes.forEach((freq, i) => playTone(freq, i * 0.12, 0.32, "triangle", 0.2));
+}
+
+// ---- ダイブ演出用の効果音（仮想訓練空間へ意識が同期していく没入感を出す） ----
+// 上昇していくノコギリ波のアルペジオで「エネルギーが高まっていく」感じを出す
+function playDiveSyncSound() {
+  const notes = [130.81, 164.81, 196.0, 246.94, 329.63, 392.0, 493.88];
+  notes.forEach((freq, i) => playTone(freq, i * 0.11, 0.5, "sawtooth", 0.045));
+  // 低音のうねりを重ねて厚みを出す
+  playTone(65.41, 0, 1.1, "sine", 0.08);
+}
+
+// 接続完了時の確認音（澄んだ2音のチャイム）
+function playDiveCompleteSound() {
+  playTone(659.25, 0, 0.16, "sine", 0.2);
+  playTone(1046.5, 0.1, 0.4, "sine", 0.22);
 }
 
 // ---- 紙吹雪演出 ----
@@ -1080,6 +1096,7 @@ async function startAsUser(rawName, rawPin) {
   connectingOverlay.hidden = false;
   void connectingOverlay.offsetWidth;
   connectingOverlay.classList.add("show", "syncing");
+  playDiveSyncSound();
 
   // 意識が仮想空間へ同期していく中間演出。最低でもこの時間は見せるが、
   // オーバーレイをタップすればいつでもスキップできる
@@ -1105,6 +1122,7 @@ async function startAsUser(rawName, rawPin) {
     // 一瞬見せてから任務端末（スタート画面）へ遷移する
     connectingOverlay.classList.remove("syncing");
     connectingText.textContent = "接続完了。任務端末を起動します。";
+    playDiveCompleteSound();
     await waitOrSkip(connectingOverlay, 600);
     showScreen("screen-start");
     connectingOverlay.classList.remove("show");
@@ -1290,6 +1308,7 @@ let currentRankingType = "overall";
 const RANKING_SUBCOPY = {
   overall: "正答率が高い順に表示しています（上位100名）",
   weekly: "直近7日間の正解数が多い順に表示しています（上位100名）",
+  monthly: "直近30日間の正解数が多い順に表示しています（上位100名）",
   combo: "最大コンボ数が多い順に表示しています（上位100名）",
   suppression: "正答率が高い順に表示しています（上位100名）",
   missions: "累計解答数が多い順に表示しています（上位100名）",
@@ -1309,6 +1328,14 @@ function setupRankingTabs() {
   });
 }
 
+// 順位ごとの見た目（1位=金・2位=銀・3位=銅のふち、カードの大きさは1→2→3→4位の順に
+// 小さくなり、4位以降はすべて同じ最小サイズにして視覚的にメリハリを付ける）
+function buildRankingRowRankClass(rank) {
+  const rankClass = rank === 1 ? "rank-gold" : rank === 2 ? "rank-silver" : rank === 3 ? "rank-bronze" : "";
+  const sizeClass = `rank-size-${Math.min(rank, 4)}`;
+  return `${rankClass} ${sizeClass}`.trim();
+}
+
 // 攻略者ボードのタブごとに、表示する見出し行・詳細行の中身を組み立てる
 function buildRankingStatsLines(type, row) {
   const levelLine = `Lv.${row.level ?? 1} ${getLevelTitle(row.level ?? 1)} ／ 累計EXP ${(row.total_exp ?? 0).toLocaleString()}`;
@@ -1317,6 +1344,11 @@ function buildRankingStatsLines(type, row) {
       return {
         headline: `今週の正解数 ${row.weekly_correct}問`,
         detail: [`今週の解答数 ${row.weekly_answered}問`, levelLine]
+      };
+    case "monthly":
+      return {
+        headline: `今月の正解数 ${row.monthly_correct}問`,
+        detail: [`今月の解答数 ${row.monthly_answered}問`, levelLine]
       };
     case "combo":
       return {
@@ -1370,7 +1402,7 @@ async function renderRankingScreen() {
 
     rows.forEach((row, idx) => {
       const item = document.createElement("div");
-      item.className = "ranking-row" + (idx < 3 ? " is-top3" : "");
+      item.className = "ranking-row " + buildRankingRowRankClass(idx + 1);
 
       const rank = document.createElement("span");
       rank.className = "ranking-rank";
