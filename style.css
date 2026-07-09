@@ -366,8 +366,9 @@ body {
 }
 .ranking-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
+  gap: 4px 12px;
   padding: 10px 12px;
   border-radius: 10px;
   background: #f9fbfa;
@@ -389,15 +390,19 @@ body {
 }
 .ranking-name {
   flex: 1 1 auto;
+  min-width: 0;
   font-weight: bold;
   overflow-wrap: anywhere;
 }
 .ranking-stats {
-  flex: none;
-  text-align: right;
+  flex: 1 1 100%;
+  width: 100%;
+  padding-left: 40px;
+  text-align: left;
   font-size: 0.8rem;
   color: var(--color-muted);
-  line-height: 1.4;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 .ranking-stats b {
   color: var(--color-primary-dark);
