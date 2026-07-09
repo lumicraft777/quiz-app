@@ -72,16 +72,34 @@ create index if not exists answer_history_lookup
   on answer_history (user_id, question_id, answered_at desc);
 
 -- ================================================================
+-- glossary: 問題文中に出てくる専門用語の辞書（用語集機能で使用）
+-- 直接編集する場合はSQL Editorから、または scripts/sync-glossary.js
+-- （用語集シートを追加した場合）で更新する
+-- ================================================================
+create table if not exists glossary (
+  term text primary key,
+  definition text not null,
+  category text,
+  created_at timestamptz not null default now()
+);
+
+-- ================================================================
 -- RLS：直接アクセスを禁止し、RPC関数経由のみ許可する
 -- ================================================================
 alter table questions enable row level security;
 alter table users enable row level security;
 alter table answer_history enable row level security;
+alter table glossary enable row level security;
 
--- questionsは問題文自体に機密性が無いため、読み取りのみ全体公開する
+-- questions / glossary は機密性が無いため、読み取りのみ全体公開する
 drop policy if exists "questions are readable by anyone" on questions;
 create policy "questions are readable by anyone"
   on questions for select
+  using (true);
+
+drop policy if exists "glossary is readable by anyone" on glossary;
+create policy "glossary is readable by anyone"
+  on glossary for select
   using (true);
 
 -- users / answer_history にはポリシーを一切作らない

@@ -100,6 +100,112 @@ body {
 }
 
 /* ============================================================
+   用語集ボタン・パネル（全画面共通・左上固定）
+   ============================================================= */
+.dictionary-toggle {
+  position: fixed;
+  top: 14px;
+  left: 14px;
+  z-index: 80;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  border: none;
+  background: #ffffff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  font-size: 1.15rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.dictionary-toggle:active {
+  transform: scale(0.92);
+}
+
+.dictionary-panel {
+  position: fixed;
+  inset: 0;
+  background: rgba(20, 40, 35, 0.45);
+  z-index: 200;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+@media (min-width: 640px) {
+  .dictionary-panel {
+    align-items: center;
+  }
+}
+.dictionary-panel-inner {
+  background: var(--color-card);
+  width: 100%;
+  max-width: 480px;
+  max-height: 80vh;
+  border-radius: 16px 16px 0 0;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+@media (min-width: 640px) {
+  .dictionary-panel-inner {
+    border-radius: 16px;
+    max-height: 70vh;
+  }
+}
+.dictionary-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.dictionary-header h3 {
+  margin: 0;
+  color: var(--color-primary-dark);
+}
+.dictionary-close {
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--color-muted);
+  padding: 4px 8px;
+}
+.dictionary-results {
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.dictionary-item {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #f9fbfa;
+  border: 2px solid var(--color-border);
+}
+.dictionary-item.is-highlighted {
+  border-color: var(--color-accent);
+  background: #fff6ef;
+}
+.dictionary-term {
+  font-weight: bold;
+  color: var(--color-primary-dark);
+  margin: 0 0 4px;
+}
+.dictionary-definition {
+  font-size: 0.88rem;
+  line-height: 1.55;
+  margin: 0;
+}
+
+/* 問題文・選択肢・解説文中の用語ハイライト（タップで辞書を開く） */
+.glossary-term {
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  color: var(--color-primary-dark);
+}
+
+/* ============================================================
    連続正解（ストリーク）トースト通知
    ============================================================= */
 .streak-toast {

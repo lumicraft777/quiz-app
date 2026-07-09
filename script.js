@@ -66,6 +66,149 @@ function shuffleArray(arr) {
 
 
 /* ================================================================
+   用語集（辞書機能）
+   ----------------------------------------------------------------
+   ・Supabaseの glossary テーブルから全用語を読み込み、クライアント側に
+     保持しておく（件数が少ないので毎回全件取得でよい）
+   ・画面左上の📖ボタンから検索パネルを開ける
+   ・問題文・選択肢・解説文などに用語集の単語が含まれていれば、
+     自動的に下線付きでハイライトし、タップすると辞書パネルが開く
+   ================================================================ */
+
+let glossaryTerms = []; // [{ term, definition, category }]
+
+async function loadGlossary() {
+  try {
+    const res = await supabaseFetch("glossary?select=term,definition,category&order=term.asc");
+    if (res.ok) glossaryTerms = await res.json();
+  } catch (err) {
+    // 用語集が読めなくてもクイズ本体は問題なく遊べるようにする
+    console.error("用語集の読み込みに失敗しました:", err.message);
+  }
+}
+
+function setupDictionary() {
+  document.getElementById("btn-dictionary-toggle").addEventListener("click", () => openDictionary());
+  document.getElementById("btn-dictionary-close").addEventListener("click", closeDictionary);
+  document.getElementById("dictionary-panel").addEventListener("click", (e) => {
+    if (e.target.id === "dictionary-panel") closeDictionary(); // 背景クリックで閉じる
+  });
+  document.getElementById("dictionary-search").addEventListener("input", (e) => {
+    renderDictionaryResults(e.target.value);
+  });
+}
+
+// prefillTerm を渡すと、その用語で検索した状態でパネルを開く
+// （問題文中の用語をタップしたときに使う）
+function openDictionary(prefillTerm) {
+  const panel = document.getElementById("dictionary-panel");
+  const searchInput = document.getElementById("dictionary-search");
+  searchInput.value = prefillTerm || "";
+  renderDictionaryResults(searchInput.value, prefillTerm);
+  panel.hidden = false;
+  if (!prefillTerm) searchInput.focus();
+}
+
+function closeDictionary() {
+  document.getElementById("dictionary-panel").hidden = true;
+}
+
+function renderDictionaryResults(query, highlightTerm) {
+  const resultsEl = document.getElementById("dictionary-results");
+  const emptyEl = document.getElementById("dictionary-empty-text");
+  resultsEl.innerHTML = "";
+
+  const trimmed = (query || "").trim();
+  const filtered = trimmed
+    ? glossaryTerms.filter((g) => g.term.includes(trimmed) || g.definition.includes(trimmed))
+    : glossaryTerms;
+
+  if (filtered.length === 0) {
+    emptyEl.hidden = false;
+    return;
+  }
+  emptyEl.hidden = true;
+
+  filtered.forEach((g) => {
+    const item = document.createElement("div");
+    item.className = "dictionary-item" + (g.term === highlightTerm ? " is-highlighted" : "");
+
+    const termEl = document.createElement("p");
+    termEl.className = "dictionary-term";
+    termEl.textContent = g.term;
+
+    const defEl = document.createElement("p");
+    defEl.className = "dictionary-definition";
+    defEl.textContent = g.definition;
+
+    item.appendChild(termEl);
+    item.appendChild(defEl);
+    resultsEl.appendChild(item);
+  });
+}
+
+// テキストを指定したコンテナ要素に描画する。用語集に登録された単語が
+// 含まれていれば、その部分だけクリック可能なspanに置き換える。
+// innerHTMLは使わず必ずDOM操作で組み立てるため、問題文に特殊文字が
+// 含まれていても安全。
+function renderTextWithGlossary(container, text) {
+  container.innerHTML = "";
+  appendTextWithGlossary(container, text);
+}
+
+// renderTextWithGlossaryと同じことをするが、コンテナの中身を消さずに
+// 末尾へ追記する（「理由：」のような固定ラベルの後に続けたい場合に使う）
+function appendTextWithGlossary(container, text) {
+  if (!text) return;
+  if (glossaryTerms.length === 0) {
+    container.appendChild(document.createTextNode(text));
+    return;
+  }
+
+  // 長い用語を優先してマッチさせる（「全負荷」が「全負荷対応」の
+  // 一部として誤ってハイライトされないようにするため）
+  const sortedTerms = [...glossaryTerms].sort((a, b) => b.term.length - a.term.length);
+  const chars = Array.from(text); // サロゲートペアを考慮して1文字ずつ扱う
+  let cursor = 0;
+  let buffer = "";
+
+  const flushBuffer = () => {
+    if (buffer) {
+      container.appendChild(document.createTextNode(buffer));
+      buffer = "";
+    }
+  };
+
+  while (cursor < chars.length) {
+    let matched = null;
+    for (const g of sortedTerms) {
+      const termChars = Array.from(g.term);
+      if (termChars.length > 0 && chars.slice(cursor, cursor + termChars.length).join("") === g.term) {
+        matched = g;
+        break;
+      }
+    }
+    if (matched) {
+      flushBuffer();
+      const span = document.createElement("span");
+      span.className = "glossary-term";
+      span.textContent = matched.term;
+      span.addEventListener("click", (e) => {
+        e.stopPropagation(); // 選択肢ボタンなどの親要素のクリックに巻き込まれないようにする
+        openDictionary(matched.term);
+      });
+      container.appendChild(span);
+      cursor += Array.from(matched.term).length;
+    } else {
+      buffer += chars[cursor];
+      cursor++;
+    }
+  }
+  flushBuffer();
+}
+
+
+/* ================================================================
    [パート2] 画面制御・クイズ進行ロジック（アプリ本体）
    ================================================================ */
 
@@ -423,7 +566,9 @@ async function initApp() {
   document.getElementById("btn-sound-toggle").addEventListener("click", toggleSound);
   setupUserScreen();
   setupStartScreen();
+  setupDictionary();
   showScreen("screen-user");
+  loadGlossary(); // 用語集はクイズ体験をブロックしないよう並行して読み込む
   await loadAllData(); // ユーザー入力中にバックグラウンドで読み込みを進めておく
 }
 
@@ -846,7 +991,7 @@ function renderQuestion() {
   const progressPct = Math.round((state.currentIndex / state.sessionQuestions.length) * 100);
   document.getElementById("quiz-progress-bar").style.width = `${progressPct}%`;
 
-  document.getElementById("question-text").textContent = q.question;
+  renderTextWithGlossary(document.getElementById("question-text"), q.question);
 
   // 実践提案モードの場合はお客様状況カードを表示する
   const customerCard = document.getElementById("customer-card");
@@ -873,7 +1018,9 @@ function renderCustomerCard(scenario, listId) {
     const b = document.createElement("b");
     b.textContent = `${label}：`;
     li.appendChild(b);
-    li.appendChild(document.createTextNode(value));
+    const valueSpan = document.createElement("span");
+    renderTextWithGlossary(valueSpan, value);
+    li.appendChild(valueSpan);
     list.appendChild(li);
   });
 }
@@ -894,7 +1041,7 @@ function renderChoices(choices) {
     letterSpan.textContent = letters[idx] || "?";
 
     const textSpan = document.createElement("span");
-    textSpan.textContent = choiceText;
+    renderTextWithGlossary(textSpan, choiceText);
 
     btn.appendChild(letterSpan);
     btn.appendChild(textSpan);
@@ -984,7 +1131,7 @@ function renderExplainScreen(q, chosenText, isCorrect) {
   banner.className = "result-banner " + (isCorrect ? "correct" : "incorrect");
 
   // クイズ画面から離れても分かるよう、問題文（＋実践提案モードならお客様状況）を再掲する
-  document.getElementById("explain-question-text").textContent = q.question;
+  renderTextWithGlossary(document.getElementById("explain-question-text"), q.question);
   const explainCustomerCard = document.getElementById("explain-customer-card");
   if (q.mode === "practice" && q.customerScenario && typeof q.customerScenario === "object") {
     explainCustomerCard.hidden = false;
@@ -995,7 +1142,7 @@ function renderExplainScreen(q, chosenText, isCorrect) {
 
   document.getElementById("explain-user-answer").textContent = chosenText;
   document.getElementById("explain-correct-answer").textContent = q.answer;
-  document.getElementById("explain-text").textContent = q.explanation;
+  renderTextWithGlossary(document.getElementById("explain-text"), q.explanation);
 
   renderChoiceBreakdown(q, chosenText);
 }
@@ -1027,7 +1174,7 @@ function renderChoiceBreakdown(q, chosenText) {
 
     const textSpan = document.createElement("span");
     textSpan.className = "choice-breakdown-text";
-    textSpan.textContent = choiceText;
+    renderTextWithGlossary(textSpan, choiceText);
 
     const badgeSpan = document.createElement("span");
     badgeSpan.className = "choice-breakdown-badge " + (isCorrectChoice ? "badge-correct" : "badge-incorrect");
@@ -1040,13 +1187,15 @@ function renderChoiceBreakdown(q, chosenText) {
 
     const reasonP = document.createElement("p");
     reasonP.className = "choice-breakdown-reason";
-    reasonP.textContent = "理由：" + (info && info.reason ? info.reason : "情報がありません。");
+    reasonP.appendChild(document.createTextNode("理由："));
+    appendTextWithGlossary(reasonP, info && info.reason ? info.reason : "情報がありません。");
     item.appendChild(reasonP);
 
     if (info && info.salesPoint) {
       const spP = document.createElement("p");
       spP.className = "choice-breakdown-salespoint";
-      spP.textContent = "営業判断のポイント：" + info.salesPoint;
+      spP.appendChild(document.createTextNode("営業判断のポイント："));
+      appendTextWithGlossary(spP, info.salesPoint);
       item.appendChild(spP);
     }
 
