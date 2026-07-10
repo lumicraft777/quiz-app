@@ -688,6 +688,8 @@ async function loginUser(username, pin) {
     exp: row.exp,
     totalExp: row.total_exp,
     streakDays: row.streak_days,
+    todayBestScore: row.today_best_score,
+    todayBestRate: row.today_best_rate,
     wrongQuestionIds: statusRows.filter((r) => !r.correct).map((r) => r.question_id),
     correctQuestionIds: statusRows.filter((r) => r.correct).map((r) => r.question_id)
   };
@@ -737,13 +739,15 @@ async function recordAnswerForUser(question, isCorrect) {
 // 発火するだけにする（＝fire-and-forget。失敗してもこの関数内でログするのみ）。
 async function recordSessionResultForUser(userId, correctCount, rate) {
   try {
-    await supabaseRpc("rpc_record_session_result", {
+    const rows = await supabaseRpc("rpc_record_session_result", {
       p_user_id: userId,
       p_score: correctCount,
       p_rate: rate
     });
+    return rows[0];
   } catch (err) {
     console.error("自己ベストの保存に失敗しました:", err.message);
+    return null;
   }
 }
 
@@ -1019,14 +1023,14 @@ function renderBestRecordOnStart() {
     return;
   }
   const r = currentUserRecord;
-  if (r.bestRate === 0 && r.bestStreak === 0) {
+  if (r.todayBestRate === 0 && r.bestStreak === 0) {
     el.textContent = "";
     return;
   }
   const parts = [];
-  if (r.bestRate > 0) parts.push(`自己ベスト正答率 ${r.bestRate}%`);
+  if (r.todayBestRate > 0) parts.push(`本日の自己ベスト正答率 ${r.todayBestRate}%`);
   if (r.bestStreak > 0) parts.push(`最大コンボ ${r.bestStreak}`);
-  el.textContent = `🏆 ${r.userName}さんの自己ベスト：` + parts.join(" ／ ");
+  el.textContent = `🏆 ${r.userName}さんの記録：` + parts.join(" ／ ");
 }
 
 // スタート画面のストリーク・称号・デイリーミッションをまとめて再取得・再描画する
@@ -1945,20 +1949,28 @@ async function renderResultScreen() {
   document.getElementById("result-knowledge-rate").textContent = formatRate(knowledgeAnswers);
   document.getElementById("result-practice-rate").textContent = formatRate(practiceAnswers);
 
-  // 自己ベスト更新チェックはローカルで即座に行い（通信を待たず演出を出す）、
-  // サーバーへの保存は非同期で進める（fire-and-forget）
+  // 自己ベスト更新チェックはローカルで即座に行い（通信を待たず演出を出す）。
+  // 「自己ベスト」表示は当日のみ・毎日リセットする仕様のため、当日の記録
+  // （todayBestScore/todayBestRate）を基準に判定する。全期間の記録
+  // （bestScore/bestRate）は称号判定・攻略者ボード用に引き続き保持する。
   let isNewRecord = newStreakRecordThisSession;
   if (currentUserRecord) {
-    if (correctCount > currentUserRecord.bestScore) {
-      currentUserRecord.bestScore = correctCount;
+    if (correctCount > currentUserRecord.bestScore) currentUserRecord.bestScore = correctCount;
+    if (rate > currentUserRecord.bestRate) currentUserRecord.bestRate = rate;
+    if (correctCount > currentUserRecord.todayBestScore) {
+      currentUserRecord.todayBestScore = correctCount;
       isNewRecord = true;
     }
-    if (rate > currentUserRecord.bestRate) {
-      currentUserRecord.bestRate = rate;
+    if (rate > currentUserRecord.todayBestRate) {
+      currentUserRecord.todayBestRate = rate;
       isNewRecord = true;
     }
     // 称号判定がサーバー側の最新値（best_rate等）を参照するため、ここはawaitする
-    await recordSessionResultForUser(currentUserRecord.id, correctCount, rate);
+    const sessionResult = await recordSessionResultForUser(currentUserRecord.id, correctCount, rate);
+    if (sessionResult) {
+      currentUserRecord.todayBestScore = sessionResult.today_best_score;
+      currentUserRecord.todayBestRate = sessionResult.today_best_rate;
+    }
   }
   document.getElementById("new-record-banner").hidden = !isNewRecord;
 
@@ -2021,8 +2033,8 @@ async function renderResultScreen() {
     const totalRate = r.totalAnswered > 0 ? Math.round((r.totalCorrect / r.totalAnswered) * 100) : 0;
     document.getElementById("result-current-streak").textContent = `${r.currentStreak}問`;
     document.getElementById("result-best-streak").textContent = `${r.bestStreak}問`;
-    document.getElementById("result-best-score").textContent = `${r.bestScore}問`;
-    document.getElementById("result-best-rate").textContent = `${r.bestRate}%`;
+    document.getElementById("result-best-score").textContent = `${r.todayBestScore}問`;
+    document.getElementById("result-best-rate").textContent = `${r.todayBestRate}%`;
     document.getElementById("result-total-answered").textContent = `${r.totalAnswered}問`;
     document.getElementById("result-total-correct").textContent = `${r.totalCorrect}問`;
     document.getElementById("result-total-rate").textContent = `${totalRate}%`;

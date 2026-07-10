@@ -58,6 +58,9 @@ create table if not exists users (
   last_active_date date,
   streak_days int not null default 0,
   review_correct_count int not null default 0,
+  today_best_score int not null default 0,
+  today_best_rate int not null default 0,
+  today_best_date date,
   created_at timestamptz not null default now()
 );
 
@@ -121,7 +124,8 @@ create or replace function rpc_login(p_username text, p_pin text)
 returns table (
   id uuid, username text, best_score int, best_rate int,
   current_streak int, best_streak int, total_answered int, total_correct int,
-  level int, exp int, total_exp int, streak_days int
+  level int, exp int, total_exp int, streak_days int,
+  today_best_score int, today_best_rate int
 )
 language plpgsql
 security definer
@@ -137,8 +141,8 @@ begin
   select * into v_user from users u where u.username = p_username;
 
   if v_user.id is null then
-    insert into users (username, pin_hash, last_active_date, streak_days)
-    values (p_username, crypt(p_pin, gen_salt('bf')), v_today, 1)
+    insert into users (username, pin_hash, last_active_date, streak_days, today_best_date)
+    values (p_username, crypt(p_pin, gen_salt('bf')), v_today, 1, v_today)
     returning * into v_user;
   else
     if v_user.pin_hash <> crypt(p_pin, v_user.pin_hash) then
@@ -152,14 +156,27 @@ begin
       v_user.streak_days := v_user.streak_days + 1;
     end if;
 
-    update users u set last_active_date = v_today, streak_days = v_user.streak_days
+    -- 「本日の自己ベスト」は日付が変わっていたらリセットする
+    if v_user.today_best_date is null or v_user.today_best_date < v_today then
+      v_user.today_best_score := 0;
+      v_user.today_best_rate := 0;
+      v_user.today_best_date := v_today;
+    end if;
+
+    update users u set
+      last_active_date = v_today,
+      streak_days = v_user.streak_days,
+      today_best_score = v_user.today_best_score,
+      today_best_rate = v_user.today_best_rate,
+      today_best_date = v_user.today_best_date
     where u.id = v_user.id;
   end if;
 
   return query
     select v_user.id, v_user.username, v_user.best_score, v_user.best_rate,
            v_user.current_streak, v_user.best_streak, v_user.total_answered, v_user.total_correct,
-           v_user.level, v_user.exp, v_user.total_exp, v_user.streak_days;
+           v_user.level, v_user.exp, v_user.total_exp, v_user.streak_days,
+           v_user.today_best_score, v_user.today_best_rate;
 end;
 $$;
 
@@ -205,17 +222,43 @@ $$;
 -- ================================================================
 -- RPC 3: セッション終了時に自己ベスト（正答数・正答率）を更新する
 -- ================================================================
+drop function if exists rpc_record_session_result(uuid, int, int);
 create or replace function rpc_record_session_result(
   p_user_id uuid, p_score int, p_rate int
 )
-returns void
-language sql
+returns table (today_best_score int, today_best_rate int)
+language plpgsql
 security definer
 as $$
-  update users set
-    best_score = greatest(best_score, p_score),
-    best_rate = greatest(best_rate, p_rate)
-  where id = p_user_id;
+declare
+  v_today date := current_date;
+  v_today_score int;
+  v_today_rate int;
+  v_today_date date;
+begin
+  select u.today_best_score, u.today_best_rate, u.today_best_date
+  into v_today_score, v_today_rate, v_today_date
+  from users u where u.id = p_user_id;
+
+  -- 「本日の自己ベスト」は日付が変わっていたらリセットしてから更新する
+  if v_today_date is null or v_today_date < v_today then
+    v_today_score := p_score;
+    v_today_rate := p_rate;
+  else
+    v_today_score := greatest(v_today_score, p_score);
+    v_today_rate := greatest(v_today_rate, p_rate);
+  end if;
+
+  update users u set
+    best_score = greatest(u.best_score, p_score),
+    best_rate = greatest(u.best_rate, p_rate),
+    today_best_score = v_today_score,
+    today_best_rate = v_today_rate,
+    today_best_date = v_today
+  where u.id = p_user_id;
+
+  return query select v_today_score, v_today_rate;
+end;
 $$;
 
 -- ================================================================
