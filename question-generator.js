@@ -256,6 +256,16 @@ function makerLabel(p) {
   return `${p.maker} ${p.series}`;
 }
 
+// スプレッドシートの記載が「〜の可能性がある」「確認できず」のような
+// 推測・断定回避の表現になっている場合、そのまま問題文や解説に出すと
+// 実務で使える知識として頼りない印象になってしまう。上級問題では
+// こうした曖昧な記載を出題対象から除外し、断定できる事実のみを扱う。
+function containsVagueHedging(text) {
+  if (isUnknownValue(text)) return false;
+  const s = String(text);
+  return /可能性|かもしれない|と思われる|とみられる|恐れがある|断定はできない|確認できず|明記されていない|不明瞭|おそらく|といわれる|一部不明/.test(s);
+}
+
 // 「」でくくられた文章が二重括弧にならないよう外側の記号を外す
 function stripOuterQuotes(text) {
   const s = String(text).trim();
@@ -362,6 +372,9 @@ function genReverseQuestions(products, field, questionPrefix, category, difficul
 
   products.forEach((p) => {
     if (isUnknownValue(p[field])) return;
+    // 「〜の可能性がある」「確認できず」のような曖昧・推測混じりの記載は、
+    // 断定できる知識として出題するのに向かないため対象から外す
+    if (containsVagueHedging(p[field])) return;
     const stem = stripOuterQuotes(p[field]);
 
     const correctAnswer = answerType === "product" ? makerLabel(p) : p.maker;
@@ -381,10 +394,18 @@ function genReverseQuestions(products, field, questionPrefix, category, difficul
     const distractors = pickRandomN(distractorPool, 3);
     const choices = shuffleArray([correctAnswer, ...distractors.map((d) => d.label)]);
 
+    // デメリット（注意点）の逆引き問題は、単なる暗記ではなく「営業として
+    // どう扱うべきか」まで解説することで実践的な内容にする
+    const explanationText = field === "demerit"
+      ? `この注意点は${p.maker}「${p.series}」に該当します。営業時にはこの点を隠さず正直に伝え、事前確認を怠らないようにしましょう。${buildKnowledgeExplanation(p)}`
+      : buildKnowledgeExplanation(p);
+
     const choiceExplanations = {};
     choiceExplanations[correctAnswer] = {
       result: "正解",
-      reason: `この文章は${p.maker}「${p.series}」についての記述です。${buildKnowledgeExplanation(p)}`
+      reason: field === "demerit"
+        ? `この注意点は${p.maker}「${p.series}」に該当します。提案の際は先回りして説明し、お客様の懸念を先に解消しておくことが信頼につながります。`
+        : `この文章は${p.maker}「${p.series}」についての記述です。${buildKnowledgeExplanation(p)}`
     };
     distractors.forEach((d) => {
       const ownText = !isUnknownValue(d.product[field]) ? stripOuterQuotes(d.product[field]) : null;
@@ -408,7 +429,7 @@ function genReverseQuestions(products, field, questionPrefix, category, difficul
       customerScenario: "",
       choices,
       answer: correctAnswer,
-      explanation: buildKnowledgeExplanation(p),
+      explanation: explanationText,
       choiceExplanations,
       sourceManufacturer: p.maker,
       sourceProduct: p.series
@@ -502,7 +523,7 @@ function genExtremeQuestion(products, field, mode, questionText, category, diffi
   others.forEach((x) => {
     choiceExplanations[makerLabel(x.p)] = {
       result: "不正解",
-      reason: `${makerLabel(x.p)}の実際の値は${x.p[field]}で、正解ほど${comparisonWord}ありません。`
+      reason: `${makerLabel(x.p)}の実際の値は${x.p[field]}で、正解ほど${comparisonWord}ありません。ただしこの製品にも別の強みがあるため、条件次第では有効な選択肢になり得ます。`
     };
   });
 
@@ -518,7 +539,8 @@ function genExtremeQuestion(products, field, mode, questionText, category, diffi
     explanation:
       buildKnowledgeExplanation(correctP) +
       `参考値：${correctP[field]}。` +
-      `比較問題では、営業トークで「どこが一番強みか」を数字で語れるようにしておくことが大切です。`,
+      `数字を暗記するだけでなく、「この差がどんなお客様にとって決め手になるか」まで説明できて初めて営業トークとして使えます。` +
+      `数値の大小だけで押すのではなく、お客様が実際にその差を必要としているかを見極めてから伝えましょう。`,
     choiceExplanations,
     sourceManufacturer: correctP.maker,
     sourceProduct: correctP.series
