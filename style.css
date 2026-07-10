@@ -820,6 +820,42 @@ body.dive-active {
   opacity: 1;
 }
 
+/* 接続完了の締めくくり演出：リング・HUDが中心へ一気に収束し、
+   直後に画面が白転する。「目を開けたらメイン画面にいる」感覚を狙う */
+.dive-connecting-overlay.converging .dive-sync-ring {
+  animation: dive-ring-converge 0.45s cubic-bezier(0.6, 0, 0.9, 0.2) forwards !important;
+  animation-delay: 0s !important;
+}
+@keyframes dive-ring-converge {
+  0% { transform: translate(-50%, -50%) scale(1.4); opacity: 0.9; }
+  70% { opacity: 1; }
+  100% { transform: translate(-50%, -50%) scale(0); opacity: 1; }
+}
+.dive-connecting-overlay.converging .dive-sync-player,
+.dive-connecting-overlay.converging .dive-connecting-text {
+  animation: dive-hud-collapse 0.4s ease-in forwards;
+}
+@keyframes dive-hud-collapse {
+  0% { transform: scale(1); opacity: 1; filter: blur(0); }
+  100% { transform: scale(0.15); opacity: 0; filter: blur(3px); }
+}
+.dive-connecting-overlay.converging .dive-sync-noise {
+  animation: dive-noise-flicker 0.06s steps(2) infinite !important;
+  opacity: 0.55 !important;
+}
+.dive-whiteout {
+  position: absolute;
+  inset: 0;
+  background: #ffffff;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.32s ease;
+  z-index: 5;
+}
+.dive-connecting-overlay.whiteout .dive-whiteout {
+  opacity: 1;
+}
+
 /* ============================================================
    ユーザー切り替えバー（スタート画面）
    ============================================================= */

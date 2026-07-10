@@ -1216,14 +1216,21 @@ async function startAsUser(rawName, rawPin) {
     validateStartButton();
 
     // 中間演出（リング・ノイズ・スキャンライン）を終え、「接続完了」を
-    // 一瞬見せてから任務端末（スタート画面）へ遷移する
+    // 一瞬見せたあと、粒子（リング・HUD）が中心へ収束→画面が白転し、
+    // その裏でスタート画面へ切り替えてから白がフェードして
+    // 「目を開けたらメイン画面にいる」ような没入感で遷移する
     connectingOverlay.classList.remove("syncing");
     connectingText.textContent = "接続完了。任務端末を起動します。";
     playDiveCompleteSound();
-    await waitOrSkip(connectingOverlay, 600);
-    showScreen("screen-start");
-    connectingOverlay.classList.remove("show");
-    setTimeout(() => { connectingOverlay.hidden = true; }, 300);
+    await waitOrSkip(connectingOverlay, 500);
+    connectingOverlay.classList.add("converging");
+    playDeepImpactSound();
+    await waitOrSkip(connectingOverlay, 450);
+    connectingOverlay.classList.add("whiteout");
+    await waitOrSkip(connectingOverlay, 320);
+    showScreen("screen-start"); // 白転で覆われている間に瞬時に切り替える
+    connectingOverlay.classList.remove("show", "converging", "whiteout");
+    setTimeout(() => { connectingOverlay.hidden = true; }, 350);
   } catch (err) {
     connectingOverlay.classList.remove("show", "syncing");
     setTimeout(() => { connectingOverlay.hidden = true; }, 300);

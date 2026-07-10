@@ -7,7 +7,7 @@
 <!-- style.css / script.js を編集したら ?v= の数字を必ず増やすこと。
      増やさないと、ブラウザにキャッシュされた古いファイルが
      読み込まれ続け、コード修正がユーザーの端末に反映されないため。 -->
-<link rel="stylesheet" href="style.css?v=22">
+<link rel="stylesheet" href="style.css?v=23">
 </head>
 <body>
 
@@ -93,6 +93,8 @@
     <p id="dive-connecting-text" class="dive-connecting-text">仮想訓練空間へ接続中...</p>
   </div>
   <p id="dive-skip-hint" class="dive-skip-hint">タップでスキップ</p>
+  <!-- 接続完了直前：粒子（リング）が中心へ収束し、白転してからメイン画面が現れる -->
+  <div class="dive-whiteout" aria-hidden="true"></div>
 </div>
 
 <!-- LEVEL UP / TITLE UPGRADE演出（結果画面でのみ表示） -->
@@ -459,6 +461,6 @@
 
 </div>
 
-<script src="script.js?v=25"></script>
+<script src="script.js?v=26"></script>
 </body>
 </html>
