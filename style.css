@@ -14,27 +14,25 @@
 }
 
 /* ============================================================
-   カラーパレット：白基調の近未来インターフェース
+   カラーパレット：ネオンが発光するサイバー空間
    ----------------------------------------------------------------
-   ベースは白〜ごく薄い青灰色にし、シアン（ネオンブルー）・
-   エメラルドグリーン・マゼンタの発光色をアクセントとして使う。
-   （ログイン画面と一部の演出オーバーレイは、没入感を出すため
-   意図的にダーク基調のままにしている＝.dive-screen等を参照）
+   黒・濃紺・深い宇宙色をベースに、シアン（ネオンブルー）・
+   エメラルドグリーン・マゼンタの発光色をアクセントに使う。
    ============================================================= */
 :root {
-  --color-bg: #f4f7fb;
-  --color-bg-2: #e9edf7;
-  --color-card: rgba(255, 255, 255, 0.86);
-  --color-card-solid: #ffffff;
-  --color-text: #1b2340;
-  --color-muted: #6b7290;
-  --color-primary: #0891b2;
-  --color-primary-dark: #0e7490;
-  --color-accent: #c026a3;
-  --color-emerald: #059669;
-  --color-correct: #059669;
-  --color-incorrect: #e11d48;
-  --color-border: rgba(8, 145, 178, 0.22);
+  --color-bg: #05070f;
+  --color-bg-2: #0a0f22;
+  --color-card: rgba(16, 21, 43, 0.78);
+  --color-card-solid: #10152b;
+  --color-text: #e7edff;
+  --color-muted: #8a93b8;
+  --color-primary: #22e3ff;
+  --color-primary-dark: #7ef1ff;
+  --color-accent: #ff31d8;
+  --color-emerald: #3dffa0;
+  --color-correct: #3dffa0;
+  --color-incorrect: #ff3d6e;
+  --color-border: rgba(34, 227, 255, 0.28);
   --radius: 14px;
 }
 
@@ -78,81 +76,46 @@ body.dive-active {
 }
 
 /* ============================================================
-   アンビエント背景（ログイン画面以外の全画面に共通）
+   アンビエント背景：デジタルトンネル（全画面共通）
    ----------------------------------------------------------------
-   白基調のベースはほぼ静的にし、画面の隅（右上・左下）だけに
-   細い光の粒子線がゆっくり動き回る演出を置く。全面を激しく動かさず、
-   世界観を控えめに支える程度の存在感にとどめる。
+   Canvas（script.jsのsetupCyberTunnelBackground）が、中央の消失点へ
+   収束/発散する発光ライン・折れ曲がるワイヤー・光点を描画する。
+   ここではキャンバスの土台と、中央奥の淡い発光、前面UIの可読性を
+   守るための半透明の暗幕だけをCSSで用意する。
    ============================================================= */
 .cyber-bg {
   position: fixed;
   inset: 0;
   z-index: 0;
   overflow: hidden;
-  background: var(--color-bg);
+  background: #020409;
 }
-/* 粒子線が動き回る領域を、画面の隅だけに限定するコンテナ */
-.cyber-bg-corner {
+.cyber-tunnel-canvas {
   position: absolute;
-  width: 50vmax;
-  height: 50vmax;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+/* 中央奥にある淡い発光ポイント（トンネルの出口のような光） */
+.cyber-bg-core {
+  position: absolute;
+  left: 50%;
+  top: 46%;
+  width: 44vmin;
+  height: 44vmin;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(34, 227, 255, 0.14), rgba(64, 130, 255, 0.05) 45%, transparent 70%);
+  filter: blur(8px);
   pointer-events: none;
 }
-.cyber-bg-corner-tr { top: -14vmax; right: -16vmax; }
-.cyber-bg-corner-bl { bottom: -16vmax; left: -18vmax; }
-
-/* 粒子線本体：細い光の筋を複数本、ゆっくり回転・伸縮させながら
-   交わらせることで「自在に動き回る」印象を出す */
-.cyber-line {
+/* 前面のUI（文字・ボタン）の可読性を守るための半透明の暗幕 */
+.cyber-bg-dim {
   position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 1px;
-  height: 60%;
-  transform-origin: center;
-  opacity: 0.5;
+  inset: 0;
+  background: rgba(2, 4, 12, 0.42);
+  pointer-events: none;
 }
-.cyber-line-1 {
-  background: linear-gradient(180deg, transparent, rgba(8, 145, 178, 0.55) 45%, transparent);
-  animation: cyber-line-spin-a 16s linear infinite;
-}
-.cyber-line-2 {
-  background: linear-gradient(180deg, transparent, rgba(192, 38, 163, 0.5) 45%, transparent);
-  height: 46%;
-  animation: cyber-line-spin-b 12s linear infinite reverse;
-}
-.cyber-line-3 {
-  background: linear-gradient(180deg, transparent, rgba(5, 150, 105, 0.45) 45%, transparent);
-  height: 70%;
-  animation: cyber-line-spin-a 21s linear infinite;
-  animation-delay: -6s;
-}
-@keyframes cyber-line-spin-a {
-  0% { transform: translate(-50%, -50%) rotate(0deg) scaleY(1); }
-  50% { transform: translate(-50%, -50%) rotate(180deg) scaleY(1.25); }
-  100% { transform: translate(-50%, -50%) rotate(360deg) scaleY(1); }
-}
-@keyframes cyber-line-spin-b {
-  0% { transform: translate(-50%, -50%) rotate(0deg) scaleY(0.85); }
-  50% { transform: translate(-50%, -50%) rotate(-180deg) scaleY(1.1); }
-  100% { transform: translate(-50%, -50%) rotate(-360deg) scaleY(0.85); }
-}
-/* 交点にうっすらと光る粒（画像を使わない軽量表現） */
-.cyber-line::after {
-  content: "";
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  background: currentColor;
-  box-shadow: 0 0 8px currentColor;
-  transform: translate(-50%, -50%);
-}
-.cyber-line-1::after { color: rgba(8, 145, 178, 0.7); }
-.cyber-line-2::after { color: rgba(192, 38, 163, 0.65); }
-.cyber-line-3::after { color: rgba(5, 150, 105, 0.6); }
 
 /* 画面切り替え：非表示の画面は display:none にする */
 .screen {
@@ -495,9 +458,7 @@ body.dive-active {
   min-height: calc(100vh - 64px);
   min-height: calc(100dvh - 64px);
   text-align: center;
-  /* ログイン画面は他画面（白基調）とは別に、意図的にダーク基調のまま
-     没入感を出すため、テキスト色もここだけ明示的に明るい色を指定する */
-  color: #e7edff;
+  color: var(--color-text);
 }
 /* .screen.active（display:block）より詳細度を上げて、ダイブ画面がアクティブな
    間だけ縦方向センタリング用のflexレイアウトに切り替える */
@@ -511,10 +472,12 @@ body.dive-active {
   inset: 0;
   z-index: 0;
   overflow: hidden;
+  /* 背面のデジタルトンネル（#cyber-bg）が透けて見えるよう半透明にし、
+     ログインフォームの可読性を守る暗幕も兼ねる */
   background:
     radial-gradient(ellipse at 50% 45%, rgba(34, 227, 255, 0.16), transparent 55%),
     radial-gradient(ellipse at 50% 110%, rgba(255, 49, 216, 0.14), transparent 60%),
-    linear-gradient(180deg, #02030a 0%, #060a1c 45%, #02030a 100%);
+    linear-gradient(180deg, rgba(2, 3, 10, 0.72) 0%, rgba(6, 10, 28, 0.55) 45%, rgba(2, 3, 10, 0.72) 100%);
 }
 .dive-grid {
   position: absolute;
@@ -593,7 +556,7 @@ body.dive-active {
   font-size: 2.1rem;
   font-weight: 800;
   letter-spacing: 0.08em;
-  color: #e7edff;
+  color: var(--color-text);
   text-shadow: 0 0 14px rgba(34, 227, 255, 0.6), 0 0 34px rgba(255, 49, 216, 0.28);
 }
 .dive-subcopy {
@@ -635,7 +598,7 @@ body.dive-active {
   border-radius: 10px;
   border: 1px solid rgba(34, 227, 255, 0.35);
   background: rgba(3, 6, 16, 0.7);
-  color: #e7edff;
+  color: var(--color-text);
   font-size: 1rem;
   outline: none;
   transition: border-color 0.2s, box-shadow 0.2s;
@@ -689,9 +652,10 @@ body.dive-active {
   z-index: 1;
   min-height: calc(100vh - 64px);
   min-height: calc(100dvh - 64px);
+  /* 背面のデジタルトンネルが透けて見えるよう半透明にする */
   background:
     radial-gradient(ellipse at 50% 15%, rgba(34, 227, 255, 0.14), transparent 55%),
-    linear-gradient(180deg, #02030a 0%, #060a1c 45%, #02030a 100%);
+    linear-gradient(180deg, rgba(2, 3, 10, 0.72) 0%, rgba(6, 10, 28, 0.6) 45%, rgba(2, 3, 10, 0.72) 100%);
   color: #e7edff;
   padding: 32px 20px 48px;
 }
@@ -951,7 +915,7 @@ body.dive-active {
   font-family: "Courier New", monospace;
   font-size: 1.1rem;
   font-weight: bold;
-  color: #e7edff;
+  color: var(--color-text);
   text-shadow: 0 0 14px rgba(34, 227, 255, 0.7);
   opacity: 0;
 }
@@ -1142,7 +1106,7 @@ body.dive-active {
   background: rgba(242, 201, 76, 0.1);
   box-shadow: 0 0 18px rgba(242, 201, 76, 0.3);
 }
-.ranking-row.rank-gold .ranking-rank { color: #b8860b; }
+.ranking-row.rank-gold .ranking-rank { color: #f2c94c; }
 .ranking-row.rank-silver {
   border-color: #cfd8e6;
   background: rgba(207, 216, 230, 0.08);
@@ -1218,9 +1182,9 @@ body.dive-active {
   font-size: 0.92rem;
   font-weight: bold;
   border-radius: 10px;
-  border: 1.5px solid rgba(220, 38, 72, 0.45);
-  background: rgba(220, 38, 72, 0.06);
-  color: #dc2648;
+  border: 1.5px solid rgba(255, 61, 110, 0.4);
+  background: rgba(255, 61, 110, 0.06);
+  color: #ff6b8f;
   cursor: pointer;
   transition: background 0.15s, border-color 0.15s;
 }
@@ -1340,8 +1304,6 @@ body.dive-active {
 .levelup-overlay.show {
   opacity: 1;
 }
-/* レベルアップ・称号解放は特別な演出として、白基調の他画面とは
-   意図的にトーンを変え、ダークな発光カードで祝う */
 .levelup-card {
   background: linear-gradient(160deg, #10142a, #1a1030);
   border: 1px solid rgba(34, 227, 255, 0.35);
@@ -1350,7 +1312,7 @@ body.dive-active {
   max-width: 420px;
   width: 100%;
   text-align: center;
-  color: #e7edff;
+  color: var(--color-text);
   box-shadow: 0 0 0 1px rgba(34, 227, 255, 0.08) inset, 0 0 60px rgba(34, 227, 255, 0.2), 0 20px 60px rgba(0, 0, 0, 0.6);
   transform: scale(0.85);
   transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
@@ -1358,12 +1320,10 @@ body.dive-active {
 .levelup-overlay.show .levelup-card {
   transform: scale(1);
 }
-/* ダークな演出カード専用の配色（白基調の--color-*とは別に、
-   ここだけ濃色背景向けの明るい色を明示的に指定する） */
 .levelup-heading {
   font-size: 1.6rem;
   font-weight: bold;
-  color: #ff31d8;
+  color: var(--color-accent);
   margin: 0 0 18px;
 }
 .levelup-transition {
@@ -1375,26 +1335,26 @@ body.dive-active {
 }
 .levelup-level-old {
   font-size: 1.1rem;
-  color: #9aa4c4;
+  color: var(--color-muted);
 }
 .levelup-arrow {
   font-size: 1.4rem;
-  color: #ff31d8;
+  color: var(--color-accent);
 }
 .levelup-level-new {
   font-size: 1.7rem;
   font-weight: bold;
-  color: #7ef1ff;
+  color: var(--color-primary-dark);
 }
 .levelup-exp {
   font-size: 1.15rem;
   font-weight: bold;
-  color: #22e3ff;
+  color: var(--color-primary);
   margin: 0 0 8px;
 }
 .levelup-subtext {
   font-size: 0.95rem;
-  color: #ff31d8;
+  color: var(--color-accent);
   font-weight: bold;
   margin: 0 0 18px;
 }
@@ -1402,17 +1362,17 @@ body.dive-active {
 /* 称号（バッジ）解放演出は.levelup-overlayの見た目を流用しつつ、
    見出しの色だけ変えて「レベルアップ」と区別がつくようにする */
 .badge-unlock-overlay .levelup-heading {
-  color: #f2c94c;
+  color: #b8860b;
 }
 .badge-unlock-title {
   font-size: 1.5rem;
   font-weight: bold;
-  color: #7ef1ff;
+  color: var(--color-primary-dark);
   margin: 0 0 8px;
 }
 .badge-unlock-desc {
   font-size: 0.95rem;
-  color: #9aa4c4;
+  color: var(--color-muted);
   margin: 0 0 18px;
 }
 
@@ -1461,7 +1421,7 @@ body.dive-active {
   box-shadow: 0 0 16px rgba(255, 61, 110, 0.2);
 }
 .mission-card-compact.has-emergency .mission-summary-toggle {
-  color: #dc2648;
+  color: #ff6b8f;
   animation: emergency-pulse-text 1.6s ease-in-out infinite;
 }
 @keyframes emergency-pulse-text {
@@ -1506,13 +1466,13 @@ body.dive-active {
   50% { border-color: rgba(255, 61, 110, 0.95); }
 }
 .mission-item.emergency .mission-item-title {
-  color: #dc2648;
+  color: #ff6b8f;
 }
 .mission-item-countdown {
   margin-top: 3px;
   font-size: 0.64rem;
   font-family: "Courier New", monospace;
-  color: #b91c3c;
+  color: #ff8fa8;
   letter-spacing: 0.03em;
 }
 .mission-item-main {
@@ -1669,7 +1629,7 @@ body.dive-active {
 }
 .status-loading { color: var(--color-muted); }
 .status-ok { color: var(--color-muted); font-weight: normal; }
-.status-warning { color: #b8860b; font-weight: bold; }
+.status-warning { color: #f2c94c; font-weight: bold; }
 .status-error { color: var(--color-incorrect); font-weight: bold; }
 
 .data-status-detail {
@@ -1764,10 +1724,10 @@ body.dive-active {
   font-weight: bold;
   border: 1px solid transparent;
 }
-.badge-progress { background: rgba(34, 227, 255, 0.1); border-color: rgba(34, 227, 255, 0.3); color: #0e7490; }
+.badge-progress { background: rgba(34, 227, 255, 0.1); border-color: rgba(34, 227, 255, 0.3); color: #7ef1ff; }
 .badge-mode { background: rgba(61, 255, 160, 0.1); border-color: rgba(61, 255, 160, 0.3); color: var(--color-emerald); }
-.badge-category { background: rgba(255, 49, 216, 0.1); border-color: rgba(255, 49, 216, 0.3); color: #a21caf; }
-.badge-difficulty { background: rgba(123, 47, 247, 0.15); border-color: rgba(123, 47, 247, 0.4); color: #7c3aed; }
+.badge-category { background: rgba(255, 49, 216, 0.1); border-color: rgba(255, 49, 216, 0.3); color: #ff8fe6; }
+.badge-difficulty { background: rgba(123, 47, 247, 0.15); border-color: rgba(123, 47, 247, 0.4); color: #c39bff; }
 
 /* ============================================================
    お客様状況カード（実践提案モード）
@@ -1781,7 +1741,7 @@ body.dive-active {
 }
 .customer-card h3 {
   margin: 0 0 10px;
-  color: #a16207;
+  color: #f2c94c;
   font-size: 1rem;
 }
 .customer-card ul {
@@ -1798,7 +1758,7 @@ body.dive-active {
   border-bottom: none;
 }
 .customer-card li b {
-  color: #a16207;
+  color: #f2c94c;
   margin-right: 4px;
 }
 
@@ -1824,12 +1784,11 @@ body.dive-active {
   padding: 14px;
   border-radius: 10px;
   border: 1.5px solid var(--color-border);
-  background: var(--color-card);
+  background: rgba(16, 21, 43, 0.6);
   color: var(--color-text);
   backdrop-filter: blur(4px);
   font-size: 0.98rem;
   cursor: pointer;
-  box-shadow: 0 2px 8px rgba(8, 145, 178, 0.06);
   transition: transform 0.12s ease, border-color 0.15s, background 0.15s, box-shadow 0.15s, opacity 0.2s;
 }
 .choice-btn:active {
@@ -2049,7 +2008,7 @@ body.dive-active {
 .new-record-banner {
   text-align: center;
   font-weight: bold;
-  color: #a16207;
+  color: #f2c94c;
   background: rgba(242, 201, 76, 0.1);
   border: 1px solid rgba(242, 201, 76, 0.35);
   box-shadow: 0 0 16px rgba(242, 201, 76, 0.2);

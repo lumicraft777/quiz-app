@@ -7,7 +7,7 @@
 <!-- style.css / script.js を編集したら ?v= の数字を必ず増やすこと。
      増やさないと、ブラウザにキャッシュされた古いファイルが
      読み込まれ続け、コード修正がユーザーの端末に反映されないため。 -->
-<link rel="stylesheet" href="style.css?v=24">
+<link rel="stylesheet" href="style.css?v=26">
 </head>
 <body>
 
@@ -52,18 +52,16 @@
 <!-- 連続正解（ストリーク）を知らせるトースト通知 -->
 <div id="streak-toast" class="streak-toast" hidden></div>
 
-<!-- アプリ全体に共通の背景演出。白基調のベースはほぼ静的にし、
-     画面の隅だけに光の粒子線がゆっくり動く演出を置く（全面を激しく
-     動かさない）。ログイン画面のみ、より演出の強い#dive-bgに切り替える -->
+<!-- アプリ全体に共通の背景演出：デジタルトンネル。
+     画面中央の消失点に向かって発光ラインや光の粒子が流れ続け、
+     「仮想空間を高速で前進している」感覚を演出する（Canvas描画）。
+     ラインの位置・長さ・速度・明滅にはランダム性を持たせ、
+     UIの可読性を保つため上に半透明の暗幕（.cyber-bg-dim）を重ねる。
+     prefers-reduced-motion環境では静止画に切り替わる（script.js参照） -->
 <div id="cyber-bg" class="cyber-bg" aria-hidden="true">
-  <div class="cyber-bg-corner cyber-bg-corner-tr">
-    <div class="cyber-line cyber-line-1"></div>
-    <div class="cyber-line cyber-line-2"></div>
-  </div>
-  <div class="cyber-bg-corner cyber-bg-corner-bl">
-    <div class="cyber-line cyber-line-3"></div>
-    <div class="cyber-line cyber-line-2"></div>
-  </div>
+  <canvas id="cyber-tunnel-canvas" class="cyber-tunnel-canvas"></canvas>
+  <div class="cyber-bg-core"></div>
+  <div class="cyber-bg-dim"></div>
 </div>
 
 <!-- ダイブ画面（ログイン画面）専用の背景演出。position:fixedがscreen-fade-in
@@ -517,6 +515,6 @@
 
 </div>
 
-<script src="script.js?v=27"></script>
+<script src="script.js?v=28"></script>
 </body>
 </html>

@@ -1142,9 +1142,325 @@ function getRecommendedMissionText(rate, wrongCount, difficultyFilter) {
   return "🧭 次の推奨ミッション：新しいエリアに挑戦しよう";
 }
 
+/* ================================================================
+   背景演出：デジタルトンネル
+   ----------------------------------------------------------------
+   ・画面中央付近の消失点に向かって、発光ライン（青/シアン基調＋
+     少数の黄緑アクセント）と光の粒子が流れ続け、「仮想空間を高速で
+     前進している」感覚を演出する。
+   ・大半のラインは奥（消失点）から手前へ流れて画面外へ通り過ぎ、
+     一部は画面端から出現して中央の奥へ吸い込まれるように消える。
+   ・折れ曲がるワイヤー・交点の発光ノード・明滅する光点・高速で
+     横切る光の断片を重ね、機械的すぎないランダムな複雑さを出す。
+   ・各要素は個別にフェードイン/アウトしながら再生成されるため、
+     全体がリセットされた瞬間は見えない（＝継ぎ目のないループ）。
+   ・端末負荷を抑えるため要素数は画面サイズに応じて控えめにし、
+     タブ非表示中は描画を停止する。prefers-reduced-motion環境では
+     アニメーションせず静止画を1枚だけ描く。
+   ================================================================ */
+
+const cyberTunnel = {
+  canvas: null,
+  ctx: null,
+  w: 0,
+  h: 0,
+  cx: 0,
+  cy: 0,
+  scale: 0,
+  streaks: [],
+  wires: [],
+  dots: [],
+  frags: [],
+  lastTime: 0,
+  rafId: null,
+  reduced: false
+};
+
+// 青とシアンを基本色に、黄緑は少なめのアクセントとして使う
+function pickTunnelColor() {
+  const r = Math.random();
+  if (r < 0.08) return "170, 255, 80";   // 黄緑（重要な信号のように目立たせる）
+  if (r < 0.55) return "34, 227, 255";   // シアン
+  return "64, 130, 255";                 // 青
+}
+
+// 奥行き方向へ流れるライン。zは奥行き（大きいほど遠い）。
+// inward=trueのものは画面端から出現して中央の奥へ吸い込まれる
+function spawnTunnelStreak(scatterZ) {
+  let x = 0;
+  let y = 0;
+  // 消失点のド真ん中から生えると不自然なので、中心から少し離す
+  do {
+    x = (Math.random() * 2 - 1) * 1.5;
+    y = (Math.random() * 2 - 1) * 1.0;
+  } while (Math.sqrt(x * x + y * y) < 0.2);
+
+  const inward = Math.random() < 0.3;
+  return {
+    x,
+    y,
+    z: scatterZ ? 0.5 + Math.random() * 8 : (inward ? 0.4 + Math.random() * 0.6 : 6 + Math.random() * 3.5),
+    len: 0.3 + Math.random() * 0.9,           // 奥行き方向の線の長さ
+    speed: 1.1 + Math.random() * 2.4,         // 移動速度（ランダム）
+    inward,
+    color: pickTunnelColor(),
+    flicker: Math.random() < 0.18,            // 一部だけ明滅させる
+    phase: Math.random() * Math.PI * 2
+  };
+}
+
+// 不規則に折れ曲がるデジタルワイヤー（画面座標で描く回路状のパターン）
+function spawnTunnelWire(w, h) {
+  const points = [];
+  let x = Math.random() * w;
+  let y = Math.random() * h;
+  let angle = Math.random() * Math.PI * 2;
+  points.push({ x, y });
+  const segments = 2 + Math.floor(Math.random() * 3);
+  for (let i = 0; i < segments; i++) {
+    const len = 40 + Math.random() * 150;
+    x += Math.cos(angle) * len;
+    y += Math.sin(angle) * len;
+    points.push({ x, y });
+    // 30〜90度の範囲でランダムに折れ曲がる
+    angle += (Math.random() < 0.5 ? -1 : 1) * (Math.PI / 6 + Math.random() * (Math.PI / 3));
+  }
+  return {
+    points,
+    color: pickTunnelColor(),
+    life: 0,
+    ttl: 4 + Math.random() * 5   // 表示時間もランダム（フェードイン→保持→アウト）
+  };
+}
+
+// ランダムに点灯する小さな光点
+function spawnTunnelDot(w, h) {
+  return {
+    x: Math.random() * w,
+    y: Math.random() * h,
+    color: pickTunnelColor(),
+    phase: Math.random() * Math.PI * 2,
+    speed: 0.6 + Math.random() * 1.8,
+    size: 1 + Math.random() * 1.6
+  };
+}
+
+// 高速で通過する短い光の断片（斜めに横切って消える）
+function spawnTunnelFrag(w, h) {
+  const fromLeft = Math.random() < 0.5;
+  const angle = (fromLeft ? 0 : Math.PI) + (Math.random() * 0.9 - 0.45);
+  const speed = 900 + Math.random() * 900;
+  return {
+    x: fromLeft ? -40 : w + 40,
+    y: Math.random() * h,
+    vx: Math.cos(angle) * speed,
+    vy: Math.sin(angle) * speed,
+    len: 40 + Math.random() * 80,
+    color: pickTunnelColor(),
+    life: 0,
+    ttl: 0.5 + Math.random() * 0.7,
+    delay: Math.random() * 6   // 常に飛び交わないよう、次の出現まで間を置く
+  };
+}
+
+function resizeCyberTunnel() {
+  const t = cyberTunnel;
+  // Retina等ではdprをそのまま使うと描画面積が跳ね上がるため1.5に制限する
+  const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+  t.w = window.innerWidth;
+  t.h = window.innerHeight;
+  t.canvas.width = Math.round(t.w * dpr);
+  t.canvas.height = Math.round(t.h * dpr);
+  t.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  t.cx = t.w / 2;
+  t.cy = t.h * 0.46; // 消失点は中央より少し上（.cyber-bg-coreの位置と揃える）
+  t.scale = Math.min(t.w, t.h) * 0.9;
+
+  // 要素数は画面サイズに応じて控えめに（スマホでも安定して動くように）
+  const streakCount = Math.max(40, Math.min(80, Math.round((t.w * t.h) / 28000)));
+  t.streaks = Array.from({ length: streakCount }, () => spawnTunnelStreak(true));
+  t.wires = Array.from({ length: 5 }, () => {
+    const wire = spawnTunnelWire(t.w, t.h);
+    wire.life = Math.random() * wire.ttl; // 初期状態から表示タイミングをばらす
+    return wire;
+  });
+  t.dots = Array.from({ length: 20 }, () => spawnTunnelDot(t.w, t.h));
+  t.frags = Array.from({ length: 4 }, () => spawnTunnelFrag(t.w, t.h));
+}
+
+function drawCyberTunnelFrame(dt, time) {
+  const t = cyberTunnel;
+  const ctx = t.ctx;
+  ctx.clearRect(0, 0, t.w, t.h);
+  ctx.lineCap = "round";
+
+  // ---- 奥行き方向へ流れる発光ライン ----
+  t.streaks.forEach((s) => {
+    s.z += (s.inward ? s.speed : -s.speed) * dt;
+    if (!s.inward && s.z < 0.35) Object.assign(s, spawnTunnelStreak(false));
+    else if (s.inward && s.z > 9.5) Object.assign(s, spawnTunnelStreak(false));
+
+    const k1 = t.scale / s.z;
+    const k2 = t.scale / (s.z + s.len);
+    const x1 = t.cx + s.x * k1;
+    const y1 = t.cy + s.y * k1;
+    const x2 = t.cx + s.x * k2;
+    const y2 = t.cy + s.y * k2;
+
+    // 手前ほど太く明るく、奥ほど細く暗く（消失点の光へ収束していく）
+    let alpha = Math.min(0.75, 0.85 / s.z);
+    if (s.inward) alpha *= Math.max(0, 1.4 - s.z * 0.15);
+    if (s.flicker) alpha *= 0.55 + 0.45 * Math.sin(time * 6 + s.phase);
+    if (alpha <= 0.01) return;
+    const width = Math.min(2.4, Math.max(0.4, 2.0 / s.z));
+
+    // 2度描き（太い低透明＋細い本線）で軽量なグロー表現にする
+    ctx.strokeStyle = `rgba(${s.color}, ${alpha * 0.22})`;
+    ctx.lineWidth = width + 2.5;
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    ctx.stroke();
+    ctx.strokeStyle = `rgba(${s.color}, ${alpha})`;
+    ctx.lineWidth = width;
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    ctx.stroke();
+  });
+
+  // ---- 不規則に交差するデジタルワイヤー＋交点の発光ノード ----
+  t.wires.forEach((wire, i) => {
+    wire.life += dt;
+    if (wire.life >= wire.ttl) {
+      t.wires[i] = spawnTunnelWire(t.w, t.h);
+      return;
+    }
+    // フェードイン(15%)→保持（緩やかに明滅）→フェードアウト(25%)
+    const progress = wire.life / wire.ttl;
+    let alpha;
+    if (progress < 0.15) alpha = progress / 0.15;
+    else if (progress > 0.75) alpha = (1 - progress) / 0.25;
+    else alpha = 0.85 + 0.15 * Math.sin(time * 2 + i);
+    alpha *= 0.3;
+
+    ctx.strokeStyle = `rgba(${wire.color}, ${alpha})`;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    wire.points.forEach((p, j) => {
+      if (j === 0) ctx.moveTo(p.x, p.y);
+      else ctx.lineTo(p.x, p.y);
+    });
+    ctx.stroke();
+
+    // 折れ曲がり点＝ノードとして小さく発光させる
+    ctx.fillStyle = `rgba(${wire.color}, ${Math.min(1, alpha * 2.4)})`;
+    wire.points.forEach((p) => {
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 1.6, 0, Math.PI * 2);
+      ctx.fill();
+    });
+  });
+
+  // ---- ランダムに明滅する光点 ----
+  t.dots.forEach((d) => {
+    const alpha = 0.12 + 0.3 * (0.5 + 0.5 * Math.sin(time * d.speed + d.phase));
+    ctx.fillStyle = `rgba(${d.color}, ${alpha})`;
+    ctx.beginPath();
+    ctx.arc(d.x, d.y, d.size, 0, Math.PI * 2);
+    ctx.fill();
+  });
+
+  // ---- 高速で通過する短い光の断片 ----
+  t.frags.forEach((f, i) => {
+    if (f.delay > 0) {
+      f.delay -= dt;
+      return;
+    }
+    f.life += dt;
+    f.x += f.vx * dt;
+    f.y += f.vy * dt;
+    if (f.life >= f.ttl || f.x < -120 || f.x > t.w + 120) {
+      t.frags[i] = spawnTunnelFrag(t.w, t.h);
+      return;
+    }
+    const alpha = 0.5 * Math.sin((f.life / f.ttl) * Math.PI);
+    const norm = Math.sqrt(f.vx * f.vx + f.vy * f.vy);
+    ctx.strokeStyle = `rgba(${f.color}, ${alpha})`;
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(f.x, f.y);
+    ctx.lineTo(f.x - (f.vx / norm) * f.len, f.y - (f.vy / norm) * f.len);
+    ctx.stroke();
+  });
+}
+
+function cyberTunnelLoop(timestamp) {
+  const t = cyberTunnel;
+  if (!t.lastTime) t.lastTime = timestamp;
+  // タブ復帰直後などの巨大なdtで要素がワープしないよう上限を設ける
+  const dt = Math.min((timestamp - t.lastTime) / 1000, 0.05);
+  t.lastTime = timestamp;
+  drawCyberTunnelFrame(dt, timestamp / 1000);
+  t.rafId = requestAnimationFrame(cyberTunnelLoop);
+}
+
+function startCyberTunnel() {
+  const t = cyberTunnel;
+  if (t.rafId !== null) return;
+  if (t.reduced) {
+    // 「動きを減らす」設定中はアニメーションせず、静止画を1枚だけ描く
+    drawCyberTunnelFrame(0, 1);
+    return;
+  }
+  t.lastTime = 0;
+  t.rafId = requestAnimationFrame(cyberTunnelLoop);
+}
+
+function stopCyberTunnel() {
+  if (cyberTunnel.rafId !== null) {
+    cancelAnimationFrame(cyberTunnel.rafId);
+    cyberTunnel.rafId = null;
+  }
+}
+
+function setupCyberTunnelBackground() {
+  const canvas = document.getElementById("cyber-tunnel-canvas");
+  if (!canvas || !canvas.getContext) return;
+  cyberTunnel.canvas = canvas;
+  cyberTunnel.ctx = canvas.getContext("2d");
+  if (!cyberTunnel.ctx) return;
+
+  const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+  cyberTunnel.reduced = motionQuery.matches;
+  // 設定変更に追従する（古いSafari向けにaddListenerもフォールバック）
+  const onMotionChange = (e) => {
+    cyberTunnel.reduced = e.matches;
+    stopCyberTunnel();
+    startCyberTunnel();
+  };
+  if (motionQuery.addEventListener) motionQuery.addEventListener("change", onMotionChange);
+  else if (motionQuery.addListener) motionQuery.addListener(onMotionChange);
+
+  window.addEventListener("resize", () => {
+    resizeCyberTunnel();
+    if (cyberTunnel.reduced) drawCyberTunnelFrame(0, 1);
+  });
+
+  // タブが非表示の間は描画を止めて無駄な負荷をかけない
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) stopCyberTunnel();
+    else startCyberTunnel();
+  });
+
+  resizeCyberTunnel();
+  startCyberTunnel();
+}
+
 // ---- 起動時の初期化 ----
 async function initApp() {
   loadSoundPreference();
+  setupCyberTunnelBackground();
   document.getElementById("btn-sound-toggle").addEventListener("click", toggleSound);
   setupUserScreen();
   setupStartScreen();
@@ -2425,10 +2741,8 @@ function showScreen(id) {
   // ここでscreen-userがアクティブな間だけ表示する
   const diveBg = document.getElementById("dive-bg");
   if (diveBg) diveBg.hidden = id !== "screen-user";
-  // 通常画面用のアンビエント背景（#cyber-bg）は、ログイン画面・初回登録画面
-  // ではより演出の強い専用背景に任せるため隠す
-  const cyberBg = document.getElementById("cyber-bg");
-  if (cyberBg) cyberBg.hidden = id === "screen-user" || id === "screen-onboarding";
+  // デジタルトンネル背景（#cyber-bg）は全画面共通。ログイン画面では
+  // 半透明の#dive-bgが上に重なり、トンネルがうっすら透けて見える
   // ダイブ画面表示中は上下左右のスワイプでページ自体が動かないようにする
   // （端末のオーバースクロール／ラバーバンドで背景の白が見えるのを防ぐ）
   document.documentElement.classList.toggle("dive-active", id === "screen-user");
