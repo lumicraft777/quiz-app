@@ -61,6 +61,11 @@ create table if not exists users (
   today_best_score int not null default 0,
   today_best_rate int not null default 0,
   today_best_date date,
+  onboarding_completed boolean not null default true,
+  goal_tags text[],
+  goal_reason text,
+  commitment_cadence text,
+  resolve_percent int,
   created_at timestamptz not null default now()
 );
 
@@ -146,7 +151,8 @@ returns table (
   id uuid, username text, best_score int, best_rate int,
   current_streak int, best_streak int, total_answered int, total_correct int,
   level int, exp int, total_exp int, streak_days int,
-  today_best_score int, today_best_rate int
+  today_best_score int, today_best_rate int,
+  onboarding_completed boolean, goal_reason text
 )
 language plpgsql
 security definer
@@ -162,8 +168,8 @@ begin
   select * into v_user from users u where u.username = p_username;
 
   if v_user.id is null then
-    insert into users (username, pin_hash, last_active_date, streak_days, today_best_date)
-    values (p_username, crypt(p_pin, gen_salt('bf')), v_today, 1, v_today)
+    insert into users (username, pin_hash, last_active_date, streak_days, today_best_date, onboarding_completed)
+    values (p_username, crypt(p_pin, gen_salt('bf')), v_today, 1, v_today, false)
     returning * into v_user;
   else
     if v_user.pin_hash <> crypt(p_pin, v_user.pin_hash) then
@@ -197,8 +203,29 @@ begin
     select v_user.id, v_user.username, v_user.best_score, v_user.best_rate,
            v_user.current_streak, v_user.best_streak, v_user.total_answered, v_user.total_correct,
            v_user.level, v_user.exp, v_user.total_exp, v_user.streak_days,
-           v_user.today_best_score, v_user.today_best_rate;
+           v_user.today_best_score, v_user.today_best_rate,
+           v_user.onboarding_completed, v_user.goal_reason;
 end;
+$$;
+
+-- ================================================================
+-- RPC: 初回登録ヒアリング（変えたい未来／理由／継続方法／覚悟）を保存する
+-- ================================================================
+create or replace function rpc_save_onboarding(
+  p_user_id uuid, p_goal_tags text[], p_goal_reason text,
+  p_commitment_cadence text, p_resolve_percent int
+)
+returns void
+language sql
+security definer
+as $$
+  update users u set
+    goal_tags = p_goal_tags,
+    goal_reason = nullif(trim(p_goal_reason), ''),
+    commitment_cadence = p_commitment_cadence,
+    resolve_percent = greatest(0, least(100, p_resolve_percent)),
+    onboarding_completed = true
+  where u.id = p_user_id;
 $$;
 
 -- ================================================================
