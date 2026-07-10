@@ -7,7 +7,7 @@
 <!-- style.css / script.js を編集したら ?v= の数字を必ず増やすこと。
      増やさないと、ブラウザにキャッシュされた古いファイルが
      読み込まれ続け、コード修正がユーザーの端末に反映されないため。 -->
-<link rel="stylesheet" href="style.css?v=19">
+<link rel="stylesheet" href="style.css?v=21">
 </head>
 <body>
 
@@ -31,13 +31,18 @@
 <!-- 連続正解（ストリーク）を知らせるトースト通知 -->
 <div id="streak-toast" class="streak-toast" hidden></div>
 
-<!-- アプリ全体に共通の背景演出（ネオングリッド・浮遊する光の粒子）。
-     ログイン画面のみ、より演出の強い#dive-bgに切り替える -->
+<!-- アプリ全体に共通の背景演出。白基調のベースはほぼ静的にし、
+     画面の隅だけに光の粒子線がゆっくり動く演出を置く（全面を激しく
+     動かさない）。ログイン画面のみ、より演出の強い#dive-bgに切り替える -->
 <div id="cyber-bg" class="cyber-bg" aria-hidden="true">
-  <div class="cyber-bg-glow cyber-bg-glow-cyan"></div>
-  <div class="cyber-bg-glow cyber-bg-glow-magenta"></div>
-  <div class="cyber-bg-grid"></div>
-  <div class="cyber-bg-particles"></div>
+  <div class="cyber-bg-corner cyber-bg-corner-tr">
+    <div class="cyber-line cyber-line-1"></div>
+    <div class="cyber-line cyber-line-2"></div>
+  </div>
+  <div class="cyber-bg-corner cyber-bg-corner-bl">
+    <div class="cyber-line cyber-line-3"></div>
+    <div class="cyber-line cyber-line-2"></div>
+  </div>
 </div>
 
 <!-- ダイブ画面（ログイン画面）専用の背景演出。position:fixedがscreen-fade-in
