@@ -832,6 +832,24 @@ body.dive-active {
 /* ============================================================
    ランキング画面
    ============================================================= */
+/* 下までスクロールしなくても戻れるよう、画面上部にも戻るボタンを置く */
+.ranking-back-top {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 4px 0 0;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  background: rgba(34, 227, 255, 0.05);
+  color: var(--color-primary);
+  font-size: 0.82rem;
+  font-weight: bold;
+  cursor: pointer;
+}
+.ranking-back-top:active {
+  transform: scale(0.96);
+}
 .ranking-list {
   display: flex;
   flex-direction: column;
@@ -919,11 +937,29 @@ body.dive-active {
   color: var(--color-primary-dark);
   font-size: 0.95rem;
 }
+/* 途中退出ボタン：目立たせすぎて任務そのものを妨げないよう控えめな配色に
+   しつつも、はっきりクリックできるボタンとして視認できるようにする */
 .quit-early-btn {
   display: block;
   width: 100%;
   text-align: center;
-  margin-top: 4px;
+  margin-top: 10px;
+  padding: 12px;
+  font-size: 0.92rem;
+  font-weight: bold;
+  border-radius: 10px;
+  border: 1.5px solid rgba(255, 61, 110, 0.4);
+  background: rgba(255, 61, 110, 0.06);
+  color: #ff6b8f;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.quit-early-btn:hover {
+  border-color: rgba(255, 61, 110, 0.7);
+  background: rgba(255, 61, 110, 0.12);
+}
+.quit-early-btn:active {
+  transform: scale(0.98);
 }
 
 /* ============================================================
@@ -1144,6 +1180,20 @@ body.dive-active {
   color: var(--color-primary-dark);
   cursor: pointer;
 }
+/* 未達成のミッションが残っている間は「緊急クエスト」として警告色で
+   注意を引く（通常ミッションより緊張感・優先度の高さを伝える） */
+.mission-card-compact.has-emergency {
+  border-color: #ff3d6e;
+  box-shadow: 0 0 16px rgba(255, 61, 110, 0.2);
+}
+.mission-card-compact.has-emergency .mission-summary-toggle {
+  color: #ff6b8f;
+  animation: emergency-pulse-text 1.6s ease-in-out infinite;
+}
+@keyframes emergency-pulse-text {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
 .mission-summary-chevron {
   font-size: 0.7rem;
   color: var(--color-muted);
@@ -1170,6 +1220,26 @@ body.dive-active {
 .mission-item.completed {
   border-color: var(--color-emerald);
   background: rgba(61, 255, 160, 0.08);
+}
+.mission-item.emergency {
+  border-color: rgba(255, 61, 110, 0.55);
+  background: rgba(255, 61, 110, 0.06);
+  box-shadow: 0 0 10px rgba(255, 61, 110, 0.15);
+  animation: emergency-border-pulse 1.8s ease-in-out infinite;
+}
+@keyframes emergency-border-pulse {
+  0%, 100% { border-color: rgba(255, 61, 110, 0.55); }
+  50% { border-color: rgba(255, 61, 110, 0.95); }
+}
+.mission-item.emergency .mission-item-title {
+  color: #ff6b8f;
+}
+.mission-item-countdown {
+  margin-top: 3px;
+  font-size: 0.64rem;
+  font-family: "Courier New", monospace;
+  color: #ff8fa8;
+  letter-spacing: 0.03em;
 }
 .mission-item-main {
   flex: 1 1 auto;

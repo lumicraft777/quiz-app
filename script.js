@@ -383,6 +383,7 @@ function showBadgeUnlockOverlay(badge, onClosed) {
   overlay.hidden = false;
   void overlay.offsetWidth;
   overlay.classList.add("show");
+  playDeepImpactSound();
   playLevelUpSound(false);
   launchConfetti(70);
 
@@ -413,9 +414,23 @@ function showBadgeUnlockQueue(badges) {
 
 // ---- デイリーミッション表示 ----
 // 1件分のミッション行DOMを組み立てる（一覧全体用・達成済みのみの一覧用の両方で使う）
+// 本日の残り時間（23:59:59まで）を「HH:MM:SS」で返す。
+// 未達成ミッション＝緊急クエストの「残り時間」表示に使う
+function getTimeUntilMidnightText() {
+  const now = new Date();
+  const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 0);
+  const diffMs = Math.max(0, midnight - now);
+  const h = Math.floor(diffMs / 3600000);
+  const m = Math.floor((diffMs % 3600000) / 60000);
+  const s = Math.floor((diffMs % 60000) / 1000);
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+
 function buildMissionItemEl(m) {
   const item = document.createElement("div");
-  item.className = "mission-item" + (m.completed ? " completed" : "");
+  // 未達成のミッションは「緊急クエスト」として、通常より緊張感のある見た目にする
+  const isEmergency = !m.completed;
+  item.className = "mission-item" + (m.completed ? " completed" : " emergency");
 
   const main = document.createElement("div");
   main.className = "mission-item-main";
@@ -424,7 +439,7 @@ function buildMissionItemEl(m) {
   header.className = "mission-item-header";
   const title = document.createElement("span");
   title.className = "mission-item-title";
-  title.textContent = m.title;
+  title.textContent = (isEmergency ? "⚠ " : "") + m.title;
   const reward = document.createElement("span");
   reward.className = "mission-item-reward";
   reward.textContent = `+${m.reward_exp} EXP`;
@@ -440,6 +455,14 @@ function buildMissionItemEl(m) {
 
   main.appendChild(header);
   main.appendChild(track);
+
+  if (isEmergency) {
+    const countdown = document.createElement("div");
+    countdown.className = "mission-item-countdown";
+    countdown.textContent = `残り時間：${getTimeUntilMidnightText()}`;
+    main.appendChild(countdown);
+  }
+
   item.appendChild(main);
 
   if (m.claimed) {
@@ -478,7 +501,14 @@ function renderDailyMissions(missions) {
   list.innerHTML = "";
 
   const completedCount = missions.filter((m) => m.completed).length;
-  summaryText.textContent = `今日のミッション（${completedCount} / ${missions.length}達成）`;
+  const incompleteCount = missions.length - completedCount;
+  if (incompleteCount > 0) {
+    summaryText.textContent = `⚠ 緊急クエスト（${incompleteCount}件）／ 達成 ${completedCount}/${missions.length}`;
+    card.classList.add("has-emergency");
+  } else {
+    summaryText.textContent = `今日のミッション（${completedCount} / ${missions.length}達成）`;
+    card.classList.remove("has-emergency");
+  }
 
   missions.forEach((m) => {
     list.appendChild(buildMissionItemEl(m));
@@ -849,10 +879,20 @@ function playFanfare() {
 // ---- ダイブ演出用の効果音（仮想訓練空間へ意識が同期していく没入感を出す） ----
 // 上昇していくノコギリ波のアルペジオで「エネルギーが高まっていく」感じを出す
 function playDiveSyncSound() {
+  playDeepImpactSound();
   const notes = [130.81, 164.81, 196.0, 246.94, 329.63, 392.0, 493.88];
-  notes.forEach((freq, i) => playTone(freq, i * 0.11, 0.5, "sawtooth", 0.045));
+  notes.forEach((freq, i) => playTone(freq, 0.15 + i * 0.11, 0.5, "sawtooth", 0.045));
   // 低音のうねりを重ねて厚みを出す
-  playTone(65.41, 0, 1.1, "sine", 0.08);
+  playTone(65.41, 0.15, 1.1, "sine", 0.08);
+}
+
+// 重低音の「ドゥーン」に、速さを感じる高音のトランジェントを重ねたインパクト音。
+// 緊急クエストや、レベルアップ・称号解放などの重要な演出の合図に使う
+function playDeepImpactSound() {
+  playTone(48, 0, 0.7, "sine", 0.4);
+  playTone(36, 0.02, 0.85, "triangle", 0.32);
+  playTone(1400, 0, 0.05, "sawtooth", 0.09);
+  playTone(2000, 0.03, 0.04, "sawtooth", 0.07);
 }
 
 // 接続完了時の確認音（澄んだ2音のチャイム）
@@ -930,6 +970,7 @@ function showLevelUpOverlay(oldLevel, newLevel, oldTitle, newTitle, isTitleUpgra
   void overlay.offsetWidth;
   overlay.classList.add("show");
 
+  playDeepImpactSound();
   playLevelUpSound(isTitleUpgrade);
   launchConfetti(isTitleUpgrade ? 140 : 100);
 
@@ -1300,6 +1341,10 @@ function setupStartScreen() {
   document.getElementById("btn-ranking-back").addEventListener("click", () => {
     showScreen("screen-start");
   });
+  // 画面上部にも戻るボタンを置き、下までスクロールしなくても戻れるようにする
+  document.getElementById("btn-ranking-back-top").addEventListener("click", () => {
+    showScreen("screen-start");
+  });
 }
 
 // 現在選択中の攻略者ボードの種類（タブ）
@@ -1538,11 +1583,11 @@ function buildFilteredPool(mode, category, level) {
 
 // ---- 途中退出：それまでに回答した分だけで結果画面を表示する ----
 function quitQuizEarly() {
-  if (state.userAnswers.length === 0) {
-    alert("まだ1問も回答していません。1問以上回答してから終了してください。");
-    return;
-  }
-  const ok = confirm(`ここまで${state.userAnswers.length}問回答済みです。ここで終了して結果を見ますか？`);
+  const answeredCount = state.userAnswers.length;
+  const message = answeredCount === 0
+    ? "まだ1問も回答していませんが、ここで任務を中断しますか？"
+    : `ここまで${answeredCount}問回答済みです。ここで任務を中断して結果を見ますか？`;
+  const ok = confirm(message);
   if (!ok) return;
 
   showScreen("screen-result");
