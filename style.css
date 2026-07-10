@@ -324,6 +324,39 @@ body.dive-active {
   color: var(--color-primary-dark);
 }
 
+/* 問題文・選択肢中の製品名ハイライト（タップで製品詳細パネルを開く） */
+.product-term {
+  text-decoration: underline solid;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  color: var(--color-accent);
+  font-weight: 600;
+}
+
+.product-detail-body {
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.product-detail-name {
+  font-weight: bold;
+  font-size: 1.05rem;
+  color: var(--color-accent);
+  margin: 0;
+}
+.product-detail-section h4 {
+  margin: 0 0 4px;
+  font-size: 0.82rem;
+  color: var(--color-muted);
+}
+.product-detail-text {
+  font-size: 0.9rem;
+  line-height: 1.6;
+  margin: 0;
+  white-space: pre-wrap;
+}
+
 /* ============================================================
    連続正解（ストリーク）トースト通知
    ============================================================= */

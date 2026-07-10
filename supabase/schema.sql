@@ -94,14 +94,30 @@ create table if not exists glossary (
 );
 
 -- ================================================================
+-- products: 製品詳細パネル機能で使う製品カタログ（メーカー×シリーズ単位）
+-- 問題文・選択肢中の製品名をタップした際に表示する主な特徴・注意点を保持する。
+-- 直接編集する場合はSQL Editorから、または scripts/sync-questions.js
+-- （問題同期と同時に products テーブルも更新する）で更新する
+-- ================================================================
+create table if not exists products (
+  maker text not null,
+  series text not null,
+  feature text,
+  demerit text,
+  created_at timestamptz not null default now(),
+  primary key (maker, series)
+);
+
+-- ================================================================
 -- RLS：直接アクセスを禁止し、RPC関数経由のみ許可する
 -- ================================================================
 alter table questions enable row level security;
 alter table users enable row level security;
 alter table answer_history enable row level security;
 alter table glossary enable row level security;
+alter table products enable row level security;
 
--- questions / glossary は機密性が無いため、読み取りのみ全体公開する
+-- questions / glossary / products は機密性が無いため、読み取りのみ全体公開する
 drop policy if exists "questions are readable by anyone" on questions;
 create policy "questions are readable by anyone"
   on questions for select
@@ -110,6 +126,11 @@ create policy "questions are readable by anyone"
 drop policy if exists "glossary is readable by anyone" on glossary;
 create policy "glossary is readable by anyone"
   on glossary for select
+  using (true);
+
+drop policy if exists "products are readable by anyone" on products;
+create policy "products are readable by anyone"
+  on products for select
   using (true);
 
 -- users / answer_history にはポリシーを一切作らない

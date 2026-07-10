@@ -1487,5 +1487,6 @@ module.exports = {
   resetQuestionIdCounter,
   generateKnowledgeQuestions,
   generatePracticeQuestions,
-  generateBasicConceptQuestions
+  generateBasicConceptQuestions,
+  isUnknownValue
 };

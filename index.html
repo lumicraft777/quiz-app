@@ -7,7 +7,7 @@
 <!-- style.css / script.js を編集したら ?v= の数字を必ず増やすこと。
      増やさないと、ブラウザにキャッシュされた古いファイルが
      読み込まれ続け、コード修正がユーザーの端末に反映されないため。 -->
-<link rel="stylesheet" href="style.css?v=21">
+<link rel="stylesheet" href="style.css?v=22">
 </head>
 <body>
 
@@ -25,6 +25,27 @@
     <input type="text" id="dictionary-search" class="select-box" placeholder="ワールド辞典を検索（例：V2H）" autocomplete="off">
     <div id="dictionary-results" class="dictionary-results"></div>
     <p id="dictionary-empty-text" class="muted-text" hidden>該当する用語が見つかりませんでした。</p>
+  </div>
+</div>
+
+<!-- 製品詳細パネル（問題文・選択肢中の製品名をタップすると開く） -->
+<div id="product-detail-panel" class="dictionary-panel" hidden>
+  <div class="dictionary-panel-inner">
+    <div class="dictionary-header">
+      <h3>製品詳細</h3>
+      <button type="button" id="btn-product-detail-close" class="dictionary-close" aria-label="閉じる">×</button>
+    </div>
+    <div class="product-detail-body">
+      <p class="product-detail-name" id="product-detail-name"></p>
+      <div class="product-detail-section">
+        <h4>主な特徴</h4>
+        <p id="product-detail-feature" class="product-detail-text"></p>
+      </div>
+      <div class="product-detail-section">
+        <h4>注意点</h4>
+        <p id="product-detail-demerit" class="product-detail-text"></p>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -438,6 +459,6 @@
 
 </div>
 
-<script src="script.js?v=24"></script>
+<script src="script.js?v=25"></script>
 </body>
 </html>

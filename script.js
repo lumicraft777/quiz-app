@@ -76,6 +76,24 @@ function shuffleArray(arr) {
    ================================================================ */
 
 let glossaryTerms = []; // [{ term, definition, category }]
+let productCatalog = []; // [{ maker, series, feature, demerit }]
+
+// 用語集・製品名のハイライト対象をまとめたインデックス（毎回組み立て直さないようキャッシュする）
+// [{ matchText, kind: "glossary"|"product", glossary, product }]
+let highlightTermIndex = [];
+
+function rebuildHighlightTermIndex() {
+  const terms = glossaryTerms.map((g) => ({ matchText: g.term, kind: "glossary", glossary: g }));
+  productCatalog.forEach((p) => {
+    if (!p.maker || !p.series) return;
+    // 問題文では「メーカー「シリーズ」」、選択肢では「メーカー シリーズ」の
+    // 2通りの表記が使われるため、両方をハイライト対象に登録する
+    terms.push({ matchText: `${p.maker}「${p.series}」`, kind: "product", product: p });
+    terms.push({ matchText: `${p.maker} ${p.series}`, kind: "product", product: p });
+  });
+  // 長い文字列を優先してマッチさせる（部分一致による誤ハイライトを防ぐ）
+  highlightTermIndex = terms.sort((a, b) => b.matchText.length - a.matchText.length);
+}
 
 async function loadGlossary() {
   try {
@@ -84,6 +102,20 @@ async function loadGlossary() {
   } catch (err) {
     // 用語集が読めなくてもクイズ本体は問題なく遊べるようにする
     console.error("用語集の読み込みに失敗しました:", err.message);
+  } finally {
+    rebuildHighlightTermIndex();
+  }
+}
+
+async function loadProducts() {
+  try {
+    const res = await supabaseFetch("products?select=maker,series,feature,demerit&order=maker.asc");
+    if (res.ok) productCatalog = await res.json();
+  } catch (err) {
+    // 製品情報が読めなくてもクイズ本体は問題なく遊べるようにする
+    console.error("製品情報の読み込みに失敗しました:", err.message);
+  } finally {
+    rebuildHighlightTermIndex();
   }
 }
 
@@ -111,6 +143,24 @@ function openDictionary(prefillTerm) {
 
 function closeDictionary() {
   document.getElementById("dictionary-panel").hidden = true;
+}
+
+function setupProductDetail() {
+  document.getElementById("btn-product-detail-close").addEventListener("click", closeProductDetail);
+  document.getElementById("product-detail-panel").addEventListener("click", (e) => {
+    if (e.target.id === "product-detail-panel") closeProductDetail(); // 背景クリックで閉じる
+  });
+}
+
+function openProductDetail(product) {
+  document.getElementById("product-detail-name").textContent = `${product.maker} ${product.series}`;
+  document.getElementById("product-detail-feature").textContent = product.feature || "情報がありません。";
+  document.getElementById("product-detail-demerit").textContent = product.demerit || "情報がありません。";
+  document.getElementById("product-detail-panel").hidden = false;
+}
+
+function closeProductDetail() {
+  document.getElementById("product-detail-panel").hidden = true;
 }
 
 function renderDictionaryResults(query, highlightTerm) {
@@ -160,14 +210,13 @@ function renderTextWithGlossary(container, text) {
 // 末尾へ追記する（「理由：」のような固定ラベルの後に続けたい場合に使う）
 function appendTextWithGlossary(container, text) {
   if (!text) return;
-  if (glossaryTerms.length === 0) {
+  if (highlightTermIndex.length === 0) {
     container.appendChild(document.createTextNode(text));
     return;
   }
 
   // 長い用語を優先してマッチさせる（「全負荷」が「全負荷対応」の
   // 一部として誤ってハイライトされないようにするため）
-  const sortedTerms = [...glossaryTerms].sort((a, b) => b.term.length - a.term.length);
   const chars = Array.from(text); // サロゲートペアを考慮して1文字ずつ扱う
   let cursor = 0;
   let buffer = "";
@@ -181,24 +230,25 @@ function appendTextWithGlossary(container, text) {
 
   while (cursor < chars.length) {
     let matched = null;
-    for (const g of sortedTerms) {
-      const termChars = Array.from(g.term);
-      if (termChars.length > 0 && chars.slice(cursor, cursor + termChars.length).join("") === g.term) {
-        matched = g;
+    for (const t of highlightTermIndex) {
+      const termChars = Array.from(t.matchText);
+      if (termChars.length > 0 && chars.slice(cursor, cursor + termChars.length).join("") === t.matchText) {
+        matched = t;
         break;
       }
     }
     if (matched) {
       flushBuffer();
       const span = document.createElement("span");
-      span.className = "glossary-term";
-      span.textContent = matched.term;
+      span.className = matched.kind === "product" ? "product-term" : "glossary-term";
+      span.textContent = matched.matchText;
       span.addEventListener("click", (e) => {
         e.stopPropagation(); // 選択肢ボタンなどの親要素のクリックに巻き込まれないようにする
-        openDictionary(matched.term);
+        if (matched.kind === "product") openProductDetail(matched.product);
+        else openDictionary(matched.glossary.term);
       });
       container.appendChild(span);
-      cursor += Array.from(matched.term).length;
+      cursor += Array.from(matched.matchText).length;
     } else {
       buffer += chars[cursor];
       cursor++;
@@ -1082,11 +1132,13 @@ async function initApp() {
   setupUserScreen();
   setupStartScreen();
   setupDictionary();
+  setupProductDetail();
   setupDailyMissionsClickHandler();
   setupMissionsToggle();
   setupRankingTabs();
   showScreen("screen-user");
   loadGlossary(); // 用語集はクイズ体験をブロックしないよう並行して読み込む
+  loadProducts(); // 製品詳細情報も同様に並行して読み込む
   await loadAllData(); // ユーザー入力中にバックグラウンドで読み込みを進めておく
 }
 
