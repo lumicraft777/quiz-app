@@ -663,7 +663,8 @@ body.dive-active {
   max-width: 420px;
   margin: 0 auto;
 }
-.onb-step-prologue {
+/* PROLOGUE・最終演説などの全画面メッセージ演出（タップで早送り） */
+.onb-step-message {
   min-height: calc(100vh - 128px);
   min-height: calc(100dvh - 128px);
   display: flex;
@@ -824,37 +825,139 @@ body.dive-active {
   color: #cdd8f2;
 }
 .onb-contract-box p:last-child { margin-bottom: 0; }
-.onb-player-confirm {
-  margin: 16px 0 0;
-  font-family: "Courier New", monospace;
-  font-size: 0.85rem;
-  letter-spacing: 0.06em;
-  color: #7ef1ff;
-  text-align: center;
-}
-.onb-tutorial-cards {
+/* 契約の穴埋め：「私は、____のために攻略を続ける。」 */
+.onb-contract-fill {
   display: flex;
-  flex-direction: column;
-  gap: 12px;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 4px 0 0;
+  font-size: 0.92rem;
+  color: #cdd8f2;
 }
-.onb-tutorial-card {
-  padding: 16px;
-  border-radius: 12px;
-  background: rgba(12, 16, 36, 0.6);
-  border: 1px solid rgba(34, 227, 255, 0.3);
-  text-align: left;
-}
-.onb-tutorial-card-title {
-  margin: 0 0 6px;
+.onb-contract-input {
+  flex: 1 1 120px;
+  min-width: 100px;
+  padding: 6px 8px;
+  border: none;
+  border-bottom: 1.5px solid rgba(34, 227, 255, 0.5);
+  background: transparent;
+  color: #7ef1ff;
   font-size: 0.95rem;
   font-weight: bold;
-  color: #7ef1ff;
+  text-align: center;
+  outline: none;
 }
-.onb-tutorial-card-desc {
+.onb-contract-input:focus {
+  border-bottom-color: var(--color-accent);
+}
+.onb-contract-note {
+  margin: 18px 0 0;
+  font-size: 0.76rem;
+  line-height: 1.7;
+  color: var(--color-muted);
+}
+/* 「考え直す」のような控えめな戻るボタン */
+.onb-back-btn {
+  display: block;
+  width: 100%;
+  margin-top: 12px;
+  padding: 10px;
+  background: none;
+  border: 1px solid rgba(138, 147, 184, 0.4);
+  border-radius: 10px;
+  color: var(--color-muted);
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+/* プレイヤー登録演出（入力内容が1行ずつシステムログのように現れる） */
+.onb-registration-lines {
+  font-family: "Courier New", monospace;
+  text-align: left;
+  padding: 24px 4px;
+  min-height: calc(100vh - 128px);
+  min-height: calc(100dvh - 128px);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 10px;
+}
+.onb-reg-header {
+  margin: 0 0 8px;
+  font-size: 0.9rem;
+  letter-spacing: 0.14em;
+  color: var(--color-primary);
+  animation: onb-line-fade-in 0.5s ease forwards;
+}
+.onb-reg-field {
+  animation: onb-line-fade-in 0.5s ease forwards;
+}
+.onb-reg-label {
   margin: 0;
-  font-size: 0.84rem;
-  line-height: 1.6;
-  color: #b9c8e6;
+  font-size: 0.68rem;
+  letter-spacing: 0.12em;
+  color: var(--color-muted);
+}
+.onb-reg-value {
+  margin: 1px 0 0;
+  font-size: 0.95rem;
+  font-weight: bold;
+  color: #e7edff;
+}
+.onb-reg-sys {
+  margin: 0;
+  font-size: 0.8rem;
+  letter-spacing: 0.06em;
+  color: var(--color-emerald);
+  animation: onb-line-fade-in 0.4s ease forwards;
+}
+.onb-reg-final {
+  margin: 14px 0 0;
+  font-size: 1.05rem;
+  font-weight: bold;
+  color: #7ef1ff;
+  text-shadow: 0 0 16px rgba(34, 227, 255, 0.6);
+  animation: onb-line-fade-in 0.6s ease forwards;
+}
+/* 演説の締めに現れるMISSION STARTボタン */
+.onb-mission-start-btn {
+  margin-top: 20px;
+  padding: 18px 44px;
+  font-size: 1.3rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  font-family: "Courier New", monospace;
+  color: #e7edff;
+  background: linear-gradient(135deg, rgba(34, 227, 255, 0.18), rgba(255, 49, 216, 0.18));
+  border: 1.5px solid var(--color-primary);
+  border-radius: 12px;
+  cursor: pointer;
+  box-shadow: 0 0 28px rgba(34, 227, 255, 0.35);
+  animation: onb-mission-start-pulse 1.6s ease-in-out infinite;
+}
+@keyframes onb-mission-start-pulse {
+  0%, 100% { box-shadow: 0 0 18px rgba(34, 227, 255, 0.3); }
+  50% { box-shadow: 0 0 40px rgba(34, 227, 255, 0.55); }
+}
+/* 白転の中に表示するWELCOMEメッセージ（初回登録の締めのみ） */
+.dive-whiteout-text {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  text-align: center;
+}
+.dive-whiteout-text p {
+  margin: 0;
+  font-family: "Courier New", monospace;
+  font-size: 1.05rem;
+  font-weight: bold;
+  letter-spacing: 0.08em;
+  color: #1b2340;
+  animation: onb-line-fade-in 0.6s ease forwards;
 }
 /* ダイブ演出：ダイブ開始を押した後、意識が仮想空間へ同期していく
    中間演出。タップでスキップできる（script.js側でクリックを検知） */
@@ -1474,6 +1577,13 @@ body.dive-active {
   font-family: "Courier New", monospace;
   color: #ff8fa8;
   letter-spacing: 0.03em;
+}
+/* 緊急クエスト一覧の先頭に出す「未来のあなたとの約束」（初回登録の目的を再掲） */
+.mission-goal-line {
+  margin: 0 0 6px;
+  font-size: 0.74rem;
+  line-height: 1.6;
+  color: #ff8fa8;
 }
 .mission-item-main {
   flex: 1 1 auto;

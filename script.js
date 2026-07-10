@@ -555,6 +555,15 @@ function renderDailyMissions(missions) {
   if (incompleteCount > 0) {
     summaryText.textContent = `⚠ 緊急クエスト（${incompleteCount}件）／ 達成 ${completedCount}/${missions.length}`;
     card.classList.add("has-emergency");
+    // 初回登録で宣言した目的を再掲し、「未来の自分との約束」として意識づける
+    const goal = currentUserRecord &&
+      ((currentUserRecord.goalTags && currentUserRecord.goalTags[0]) || currentUserRecord.contractGoal);
+    if (goal) {
+      const goalLine = document.createElement("p");
+      goalLine.className = "mission-goal-line";
+      goalLine.textContent = `未来のあなたとの約束が、未完了のまま残っています。目的：「${goal}」`;
+      list.appendChild(goalLine);
+    }
   } else {
     summaryText.textContent = `今日のミッション（${completedCount} / ${missions.length}達成）`;
     card.classList.remove("has-emergency");
@@ -742,23 +751,43 @@ async function loginUser(username, pin) {
     todayBestRate: row.today_best_rate,
     onboardingCompleted: row.onboarding_completed,
     goalReason: row.goal_reason,
+    goalTags: row.goal_tags || [],
+    contractGoal: row.contract_goal || "",
     wrongQuestionIds: statusRows.filter((r) => !r.correct).map((r) => r.question_id),
     correctQuestionIds: statusRows.filter((r) => r.correct).map((r) => r.question_id)
   };
 }
 
-// 初回登録ヒアリングで集めた内容をサーバーへ保存する
-async function saveOnboardingForUser(userId, goalTags, goalReason, cadence, resolvePercent) {
+// 初回登録の儀式で集めた内容をサーバーへ保存する
+async function saveOnboardingForUser(userId, s) {
+  const goalTags = Array.from(s.goalTags);
   try {
     await supabaseRpc("rpc_save_onboarding", {
       p_user_id: userId,
       p_goal_tags: goalTags,
-      p_goal_reason: goalReason,
-      p_commitment_cadence: cadence,
-      p_resolve_percent: resolvePercent
+      p_goal_reason: s.reason,
+      p_commitment_cadence: s.cadence,
+      p_resolve_percent: s.resolve,
+      p_current_position: s.position,
+      p_future_identity: s.identity,
+      p_first_area: s.area,
+      p_contract_goal: s.contractGoal
     });
   } catch (err) {
-    console.error("初回登録内容の保存に失敗しました:", err.message);
+    // 拡張版RPCが未適用（マイグレーション前）の環境では旧4項目版へ
+    // フォールバックし、少なくとも完了フラグと主要項目だけは保存する
+    console.error("初回登録内容の保存に失敗（旧形式で再試行します）:", err.message);
+    try {
+      await supabaseRpc("rpc_save_onboarding", {
+        p_user_id: userId,
+        p_goal_tags: goalTags,
+        p_goal_reason: s.reason,
+        p_commitment_cadence: s.cadence,
+        p_resolve_percent: s.resolve
+      });
+    } catch (err2) {
+      console.error("初回登録内容の保存に失敗しました:", err2.message);
+    }
   }
 }
 
@@ -1577,15 +1606,27 @@ async function startAsUser(rawName, rawPin) {
 }
 
 /* ================================================================
-   初回登録：簡易ヒアリング＋チュートリアル
+   初回登録：「人生の操作権を取り戻すログイン儀式」
    ----------------------------------------------------------------
    ・新規プレイヤー（rpc_loginでonboarding_completed=falseが返った場合）
-     のみ、スタート画面より先にこの画面を通す。2回目以降のログインでは
+     のみ、スタート画面より先にこの儀式を通す。2回目以降のログインでは
      一切表示しない。
-   ・「学習方法」より先に「変えたい未来（現実の目標）」を聞く、覚悟%
-     だけでなく具体的な継続ペースも選ばせる、という2点を軸にした
-     簡易版。過度に長くならないよう、ステップ数は最小限にしている。
+   ・設計の核：目的を思い出す → 現状を認識する → 自分で選択する →
+     未来を宣言する → 最初の一歩を踏み出す。
+     「学習内容」より先に「変えたい未来（現実の目的）」を聞き、
+     覚悟%だけでなく現実的な継続ペースも自分で選ばせる。
+   ・どの覚悟の数値も否定しない（正直に始めても成長できる世界にする）。
+   ・進行はrunOnboardingSequence()が1本のasync関数として制御する。
+     メッセージ演出はすべてタップで早送りできる。
    ================================================================ */
+
+const ONBOARDING_POSITIONS = [
+  "まだスタート地点",
+  "少しずつ進んでいる",
+  "半分くらい",
+  "かなり近づいている",
+  "すでに理想を更新している"
+];
 
 const ONBOARDING_GOALS = [
   "営業成績を上げたい",
@@ -1594,34 +1635,40 @@ const ONBOARDING_GOALS = [
   "仲間や家族に成長した姿を見せたい",
   "収入を上げ人生の選択肢を増やしたい",
   "自分との約束を守れる人になりたい",
-  "誰にも負けない実力を身につけたい"
+  "誰にも負けない実力を身につけたい",
+  "その他"
+];
+
+const ONBOARDING_IDENTITIES = [
+  "どんな質問にも自信を持って答えられる人",
+  "相手の本音を引き出せる人",
+  "お客様から信頼される人",
+  "結果を安定して出し続ける人",
+  "苦しいときでも継続できる人",
+  "仲間を引っ張れる人",
+  "自分との約束を守れる人"
+];
+
+const ONBOARDING_AREAS = [
+  "太陽光営業",
+  "蓄電池営業",
+  "営業基礎",
+  "ヒアリング力",
+  "提案力",
+  "クロージング",
+  "製品知識",
+  "その他"
 ];
 
 const ONBOARDING_CADENCE_OPTIONS = [
-  "毎日5分だけでも続ける",
-  "毎日10分は必ず取り組む",
-  "毎日1ミッションはクリアする",
-  "週3回のペースで取り組む",
-  "自分で決めたペースで続ける"
+  "毎日5分",
+  "毎日10分",
+  "毎日1ミッション",
+  "週3回",
+  "自分で設定する"
 ];
 
-const ONBOARDING_TUTORIAL_CARDS = [
-  { title: "① 任務モードを選ぶ", desc: "「基礎任務」でメーカー・製品知識を、「判断任務」でお客様への提案判断力を鍛えられます。迷ったら「混成任務」でOK。" },
-  { title: "② EXPを貯めてレベルアップ", desc: "回答するたびにEXPが貯まります。正解だけでなく、挑戦したこと自体が経験として記録されます。" },
-  { title: "③ 毎日の緊急クエストを忘れずに", desc: "スタート画面上部の緊急クエストは、その日のうちに達成すると追加EXPがもらえます。" }
-];
-
-let onboardingState = null; // { goalTags: Set, reason: "", cadence: null, resolve: 50 }
-
-function startOnboardingFlow() {
-  onboardingState = { goalTags: new Set(), reason: "", cadence: null, resolve: 50 };
-  document.querySelectorAll(".onb-step").forEach((el) => { el.hidden = true; });
-  document.querySelector('.onb-step[data-onb-step="prologue"]').hidden = false;
-  renderOnboardingGoals();
-  renderOnboardingCadence();
-  updateOnboardingResolveDisplay();
-  runOnboardingPrologue();
-}
+let onboardingState = null;
 
 function showOnboardingStep(stepName) {
   document.querySelectorAll(".onb-step").forEach((el) => {
@@ -1629,152 +1676,441 @@ function showOnboardingStep(stepName) {
   });
 }
 
-// プロローグ：短い一文を順番にフェードインさせる。タップでいつでも次へ進める
-async function runOnboardingPrologue() {
-  const lines = [
-    { text: "この先の時間は、誰かに与えられたものではない。", emphasis: false },
-    { text: "あなた自身が選び取るものだ。", emphasis: false },
-    { text: "人生の操作権を、あなたに返還します。", emphasis: true }
-  ];
-  const container = document.getElementById("onb-prologue-lines");
-  const stepEl = document.querySelector('.onb-step-prologue');
-  container.innerHTML = "";
-
-  for (let i = 0; i < lines.length; i++) {
-    const p = document.createElement("p");
-    p.className = "onb-prologue-line" + (lines[i].emphasis ? " emphasis" : "");
-    p.textContent = lines[i].text;
-    container.appendChild(p);
-    if (lines[i].emphasis) playDeepImpactSound();
-    await waitOrSkip(stepEl, 1100);
-  }
-  await waitOrSkip(stepEl, 500);
-  showOnboardingStep("goals");
-}
-
-function renderOnboardingGoals() {
-  const grid = document.getElementById("onb-goal-grid");
-  grid.innerHTML = "";
-  ONBOARDING_GOALS.forEach((label) => {
-    const chip = document.createElement("button");
-    chip.type = "button";
-    chip.className = "onb-goal-chip";
-    chip.textContent = label;
-    chip.addEventListener("click", () => {
-      if (onboardingState.goalTags.has(label)) {
-        onboardingState.goalTags.delete(label);
-        chip.classList.remove("selected");
-      } else {
-        onboardingState.goalTags.add(label);
-        chip.classList.add("selected");
-      }
-      updateOnboardingGoalsAffirm();
-    });
-    grid.appendChild(chip);
-  });
-}
-
-function updateOnboardingGoalsAffirm() {
-  const el = document.getElementById("onb-goals-affirm");
-  el.textContent = onboardingState.goalTags.size > 0
-    ? "その未来は、今日からの積み重ねで確実に近づけます。"
-    : "";
-}
-
-function renderOnboardingCadence() {
-  const list = document.getElementById("onb-cadence-list");
+// 選択肢リスト（縦並び・単一選択）を組み立てる
+function buildOnbSelectList(containerId, options, onSelect) {
+  const list = document.getElementById(containerId);
   list.innerHTML = "";
-  ONBOARDING_CADENCE_OPTIONS.forEach((label) => {
+  options.forEach((label) => {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "onb-cadence-option";
     btn.textContent = label;
     btn.addEventListener("click", () => {
-      onboardingState.cadence = label;
       list.querySelectorAll(".onb-cadence-option").forEach((el) => el.classList.remove("selected"));
       btn.classList.add("selected");
+      onSelect(label);
     });
     list.appendChild(btn);
   });
 }
 
-function updateOnboardingResolveDisplay() {
-  const value = onboardingState.resolve;
-  document.getElementById("onb-resolve-value").textContent = `${value}%`;
-  const affirmEl = document.getElementById("onb-resolve-affirm");
-  if (value < 40) {
-    affirmEl.textContent = "今はそれくらいで十分です。小さく始めれば、それでいい。";
-  } else if (value < 80) {
-    affirmEl.textContent = "その本気度があれば、着実に前へ進めます。";
-  } else {
-    affirmEl.textContent = "その本気度を、これからの記録で証明していきましょう。";
+// チップ型の選択肢（multi=trueなら複数選択）を組み立てる
+function buildOnbChips(containerId, options, multi, onChange) {
+  const grid = document.getElementById(containerId);
+  grid.innerHTML = "";
+  const selected = new Set();
+  options.forEach((label) => {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "onb-goal-chip";
+    chip.textContent = label;
+    chip.addEventListener("click", () => {
+      if (multi) {
+        if (selected.has(label)) {
+          selected.delete(label);
+          chip.classList.remove("selected");
+        } else {
+          selected.add(label);
+          chip.classList.add("selected");
+        }
+      } else {
+        selected.clear();
+        grid.querySelectorAll(".onb-goal-chip").forEach((el) => el.classList.remove("selected"));
+        selected.add(label);
+        chip.classList.add("selected");
+      }
+      onChange(selected);
+    });
+    grid.appendChild(chip);
+  });
+}
+
+// 行のまとまり（グループ）を1画面ずつフェードイン表示する。
+// 各グループはタップで早送りでき、最後のグループのあとは
+// 「タップで進む」ヒントを出してクリックを待つ。
+function renderOnbLines(container, lines, emphasis) {
+  container.innerHTML = "";
+  lines.forEach((text, i) => {
+    const p = document.createElement("p");
+    p.className = "onb-prologue-line" + (emphasis ? " emphasis" : "");
+    p.style.animationDelay = `${i * 0.5}s`;
+    p.textContent = text;
+    container.appendChild(p);
+  });
+}
+
+async function playOnbMessage(groups) {
+  showOnboardingStep("message");
+  const container = document.getElementById("onb-message-lines");
+  const hint = document.getElementById("onb-message-hint");
+  const stepEl = document.querySelector('[data-onb-step="message"]');
+  hint.hidden = true;
+  for (const g of groups) {
+    renderOnbLines(container, g.lines, g.emphasis);
+    if (g.impact) {
+      // 重低音とともに、背景の粒子（デジタルトンネル）を一瞬停止させる
+      playDeepImpactSound();
+      stopCyberTunnel();
+      setTimeout(startCyberTunnel, 1500);
+    }
+    await waitOrSkip(stepEl, g.hold || (g.lines.length * 500 + 1500));
   }
+  hint.hidden = false;
+  await new Promise((resolve) => stepEl.addEventListener("click", resolve, { once: true }));
+  hint.hidden = true;
+}
+
+// 指定ボタンがクリックされる（かつvalidateを通る）まで待つ
+function waitForOnbButton(btnId, validate) {
+  return new Promise((resolve) => {
+    const btn = document.getElementById(btnId);
+    const handler = () => {
+      if (validate && !validate()) return;
+      btn.removeEventListener("click", handler);
+      resolve();
+    };
+    btn.addEventListener("click", handler);
+  });
+}
+
+// 複数ボタンのうち、どれが押されたかを待つ（100%再確認などの分岐用）
+function waitForOnbChoice(btnIds) {
+  return new Promise((resolve) => {
+    const entries = btnIds.map((id) => {
+      const btn = document.getElementById(id);
+      const handler = () => {
+        entries.forEach(([b, h]) => b.removeEventListener("click", h));
+        resolve(id);
+      };
+      btn.addEventListener("click", handler);
+      return [btn, handler];
+    });
+  });
+}
+
+function startOnboardingFlow() {
+  onboardingState = {
+    position: null,
+    goalTags: new Set(),
+    reason: "",
+    identity: null,
+    area: null,
+    cadence: null,
+    resolve: 50,
+    contractGoal: ""
+  };
+
+  const s = onboardingState;
+  buildOnbSelectList("onb-position-list", ONBOARDING_POSITIONS, (v) => {
+    s.position = v;
+    document.getElementById("onb-position-next").disabled = false;
+  });
+  buildOnbChips("onb-goal-grid", ONBOARDING_GOALS, true, (selected) => {
+    s.goalTags = selected;
+    document.getElementById("onb-goals-next").disabled = selected.size === 0;
+  });
+  buildOnbSelectList("onb-identity-list", ONBOARDING_IDENTITIES, (v) => {
+    s.identity = v;
+    document.getElementById("onb-identity-next").disabled = false;
+  });
+  buildOnbChips("onb-area-list", ONBOARDING_AREAS, false, (selected) => {
+    s.area = Array.from(selected)[0] || null;
+    document.getElementById("onb-area-next").disabled = !s.area;
+  });
+  buildOnbSelectList("onb-cadence-list", ONBOARDING_CADENCE_OPTIONS, (v) => {
+    s.cadence = v;
+    document.getElementById("onb-cadence-next").disabled = false;
+  });
+  document.getElementById("onb-position-next").disabled = true;
+  document.getElementById("onb-goals-next").disabled = true;
+  document.getElementById("onb-identity-next").disabled = true;
+  document.getElementById("onb-area-next").disabled = true;
+  document.getElementById("onb-cadence-next").disabled = true;
+  document.getElementById("onb-reason-input").value = "";
+  document.getElementById("onb-reason-warn").textContent = "";
+  document.getElementById("onb-contract-input").value = "";
+  document.getElementById("onb-resolve-slider").value = "50";
+  updateOnboardingResolveDisplay();
+
+  runOnboardingSequence();
+}
+
+function updateOnboardingResolveDisplay() {
+  document.getElementById("onb-resolve-value").textContent = `${onboardingState.resolve}%`;
 }
 
 function setupOnboarding() {
-  document.getElementById("onb-goals-next").addEventListener("click", () => {
-    onboardingState.reason = document.getElementById("onb-reason-input").value.trim();
-    showOnboardingStep("commit");
-  });
-
+  // スライダーの表示更新だけは常設リスナーで行う（他の進行は
+  // runOnboardingSequence()が都度waitForOnbButtonで待ち受ける）
   document.getElementById("onb-resolve-slider").addEventListener("input", (e) => {
+    if (!onboardingState) return;
     onboardingState.resolve = Number(e.target.value);
     updateOnboardingResolveDisplay();
   });
-
-  document.getElementById("onb-commit-next").addEventListener("click", () => {
-    if (!onboardingState.cadence) {
-      onboardingState.cadence = ONBOARDING_CADENCE_OPTIONS[0];
-    }
-    if (onboardingState.resolve >= 100) {
-      const ok = confirm("本当に100%ですか？　どんな数字でも、ここから積み重ねていけば大丈夫です。");
-      if (!ok) return;
-    }
-    document.getElementById("onb-player-confirm").textContent =
-      `識別名を確認。PLAYER：${currentUserRecord ? currentUserRecord.userName : ""}`;
-    showOnboardingStep("contract");
-  });
-
-  document.getElementById("onb-contract-submit").addEventListener("click", async () => {
-    const btn = document.getElementById("onb-contract-submit");
-    btn.disabled = true;
-    if (currentUserRecord) {
-      await saveOnboardingForUser(
-        currentUserRecord.id,
-        Array.from(onboardingState.goalTags),
-        onboardingState.reason,
-        onboardingState.cadence,
-        onboardingState.resolve
-      );
-      currentUserRecord.onboardingCompleted = true;
-      currentUserRecord.goalReason = onboardingState.reason;
-    }
-    renderOnboardingTutorialCards();
-    showOnboardingStep("tutorial");
-    btn.disabled = false;
-  });
-
-  document.getElementById("onb-tutorial-next").addEventListener("click", async () => {
-    await playDiveRevealTransition("人生の操作権を確認。任務端末を起動します。", "screen-start");
-  });
 }
 
-function renderOnboardingTutorialCards() {
-  const wrap = document.getElementById("onb-tutorial-cards");
-  wrap.innerHTML = "";
-  ONBOARDING_TUTORIAL_CARDS.forEach((card) => {
-    const el = document.createElement("div");
-    el.className = "onb-tutorial-card";
-    const title = document.createElement("p");
-    title.className = "onb-tutorial-card-title";
-    title.textContent = card.title;
-    const desc = document.createElement("p");
-    desc.className = "onb-tutorial-card-desc";
-    desc.textContent = card.desc;
-    el.appendChild(title);
-    el.appendChild(desc);
-    wrap.appendChild(el);
+async function runOnboardingSequence() {
+  const s = onboardingState;
+  const name = currentUserRecord ? currentUserRecord.userName : "";
+
+  // ---- PROLOGUE：あなたは今まで、誰として生きていたか ----
+  await playOnbMessage([
+    { lines: ["毎日、同じように時間は進んでいく。", "与えられた仕事をこなし、", "目の前の数字を追い、", "気づけば、また一日が終わる。"] },
+    { lines: ["だが、忘れないでください。", "あなたの人生は、", "誰かに操作される物語ではありません。"] },
+    { lines: ["あなたは、", "この人生の登場人物ではない。", "プレイヤーです。"], emphasis: true, impact: true, hold: 2600 },
+    { lines: ["人生の操作権を、", "あなたに返還します。"], emphasis: true }
+  ]);
+
+  // ---- STEP 1：現在地を認識させる ----
+  showOnboardingStep("position");
+  await waitForOnbButton("onb-position-next", () => !!s.position);
+  await playOnbMessage([
+    { lines: ["現在地を確認しました。"] },
+    { lines: ["今どこにいるかは、", "重要ではありません。"] },
+    { lines: ["重要なのは、", "ここからどこへ向かうかです。"], emphasis: true }
+  ]);
+
+  // ---- STEP 2：目的ではなく「変えたい未来」を聞く ----
+  showOnboardingStep("goals");
+  await waitForOnbButton("onb-goals-next", () => s.goalTags.size > 0);
+  await playOnbMessage([
+    { lines: ["目的を確認しました。", "あなたが求めているのは、", "知識だけではありません。"] },
+    { lines: ["自信。", "信頼。", "結果。"], emphasis: true },
+    { lines: ["そして、", "自分の人生を自分で選べる力。"] },
+    { lines: ["その未来へ到達するために、", "この世界は存在します。"] }
+  ]);
+
+  // ---- STEP 3：「なぜそれを望むのか」を本人の言葉で残す ----
+  showOnboardingStep("reason");
+  await waitForOnbButton("onb-reason-next", () => {
+    s.reason = document.getElementById("onb-reason-input").value.trim();
+    if (!s.reason) {
+      document.getElementById("onb-reason-warn").textContent =
+        "一言でも大丈夫です。あなた自身の言葉で残してください。";
+      return false;
+    }
+    return true;
   });
+
+  // ---- STEP 4：未来の自分を選択させる ----
+  showOnboardingStep("identity");
+  await waitForOnbButton("onb-identity-next", () => !!s.identity);
+  await playOnbMessage([
+    { lines: ["未来のプレイヤーデータを登録しました。"] },
+    { lines: ["現在のあなたと、", "未来のあなたの間にあるもの。"] },
+    { lines: ["それは、", "才能ではありません。"] },
+    { lines: ["今日から積み重ねる、", "一つひとつの行動です。"], emphasis: true }
+  ]);
+
+  // ---- STEP 5：訓練する領域を選ぶ ----
+  showOnboardingStep("area");
+  await waitForOnbButton("onb-area-next", () => !!s.area);
+
+  // ---- STEP 6：識別名の確認（IDは接続時に登録済みのため確認のみ） ----
+  await playOnbMessage([
+    { lines: ["この世界では、", "肩書も過去の成績も必要ありません。"] },
+    { lines: ["必要なのは、", "これから何者になるかだけです。"] },
+    { lines: ["識別名を確認。", `PLAYER：${name}`], emphasis: true },
+    { lines: ["これ以降、あなたの行動、経験、成長は、", "すべてこの名前に記録されます。"] }
+  ]);
+
+  // ---- STEP 7：覚悟ではなく「継続方法」を選ばせる ----
+  showOnboardingStep("cadence");
+  await waitForOnbButton("onb-cadence-next", () => !!s.cadence);
+  await playOnbMessage([
+    { lines: ["この約束は、", "運営者との約束ではありません。"] },
+    { lines: ["未来のあなたと、", "現在のあなたが交わす約束です。"], emphasis: true }
+  ]);
+
+  // ---- STEP 8：覚悟の確認（どの数値も否定しない） ----
+  showOnboardingStep("resolve");
+  for (;;) {
+    await waitForOnbButton("onb-resolve-next");
+    if (s.resolve >= 100) {
+      showOnboardingStep("resolve-confirm");
+      const choice = await waitForOnbChoice(["onb-resolve-yes", "onb-resolve-back"]);
+      if (choice === "onb-resolve-back") {
+        showOnboardingStep("resolve");
+        continue;
+      }
+      await playOnbMessage([
+        { lines: ["その覚悟、", "確かに記録しました。"], emphasis: true },
+        { lines: ["今日の宣言が本物であることを、", "これからの行動で証明してください。"] }
+      ]);
+    } else {
+      await playOnbMessage([
+        { lines: ["正直な回答を確認しました。"] },
+        { lines: ["覚悟は、", "最初から100%である必要はありません。"] },
+        { lines: ["行動するたびに、", "覚悟は強くなっていきます。"], emphasis: true }
+      ]);
+    }
+    break;
+  }
+
+  // ---- STEP 9：プレイヤー契約 ----
+  showOnboardingStep("contract");
+  await waitForOnbButton("onb-contract-submit");
+  s.contractGoal = document.getElementById("onb-contract-input").value.trim();
+
+  // この時点でサーバーへ保存する（以降の演出中に離脱しても、
+  // 次回ログインで儀式が再表示されることはない）
+  if (currentUserRecord) {
+    await saveOnboardingForUser(currentUserRecord.id, s);
+    currentUserRecord.onboardingCompleted = true;
+    currentUserRecord.goalReason = s.reason;
+    currentUserRecord.goalTags = Array.from(s.goalTags);
+    currentUserRecord.contractGoal = s.contractGoal;
+    // ログイン直後に描画済みのミッションカード等を、登録した目的入りで再描画する
+    refreshHomeExtras();
+  }
+
+  await playOnbRegistration(name, s);
+  await playOnbSpeech(name, s);
+  await playOnboardingFinaleTransition(name, s);
+}
+
+// プレイヤー登録演出：入力内容→システムログ→操作権移行の順に表示する
+async function playOnbRegistration(name, s) {
+  showOnboardingStep("registration");
+  const stepEl = document.querySelector('[data-onb-step="registration"]');
+  const box = document.getElementById("onb-registration-lines");
+  box.innerHTML = "";
+
+  const addLine = async (text, cls, hold) => {
+    const p = document.createElement("p");
+    p.className = cls;
+    p.textContent = text;
+    box.appendChild(p);
+    await waitOrSkip(stepEl, hold);
+  };
+
+  await addLine("PLAYER REGISTRATION START", "onb-reg-header", 900);
+
+  const fields = [
+    ["PLAYER", name],
+    ["CURRENT POSITION", s.position],
+    ["DESTINATION", s.identity],
+    ["REAL-WORLD OBJECTIVE", Array.from(s.goalTags).join("／")],
+    ["REASON", s.reason],
+    ["FIRST AREA", s.area],
+    ["DAILY COMMITMENT", s.cadence],
+    ["RESOLVE", `${s.resolve}%`]
+  ];
+  for (const [label, value] of fields) {
+    const wrap = document.createElement("div");
+    wrap.className = "onb-reg-field";
+    const l = document.createElement("p");
+    l.className = "onb-reg-label";
+    l.textContent = label;
+    const v = document.createElement("p");
+    v.className = "onb-reg-value";
+    v.textContent = value || "—";
+    wrap.appendChild(l);
+    wrap.appendChild(v);
+    box.appendChild(wrap);
+    playTone(880, 0, 0.05, "square", 0.05); // 1件登録されるたびの小さな確定音
+    await waitOrSkip(stepEl, 450);
+  }
+
+  await waitOrSkip(stepEl, 500);
+  const sysLines = [
+    "Purpose Verified...",
+    "Player Identity Confirmed...",
+    "Future Route Generated...",
+    "Mission Data Connected...",
+    "Life Control Authority Transferred..."
+  ];
+  for (const line of sysLines) {
+    await addLine(line, "onb-reg-sys", 550);
+  }
+
+  await waitOrSkip(stepEl, 400);
+  playDeepImpactSound();
+  await addLine(`人生の操作権を、PLAYER ${name}へ移行します。`, "onb-reg-final", 2000);
+}
+
+// 最終演説：設計者からプレイヤーへの言葉。締めにMISSION STARTボタンを出す
+async function playOnbSpeech(name, s) {
+  const goalLine = s.contractGoal || Array.from(s.goalTags)[0] || "自分の未来";
+  showOnboardingStep("speech");
+  const stepEl = document.querySelector('[data-onb-step="speech"]');
+  const container = document.getElementById("onb-speech-lines");
+
+  const groups = [
+    { lines: [`ようこそ、${name}。`, "あなたの登録は完了しました。"] },
+    { lines: ["今日からあなたは、", "この世界のプレイヤーです。"] },
+    { lines: ["しかし、勘違いしないでください。", "この世界で上がるのは、", "画面上のレベルだけではありません。"] },
+    { lines: ["ここで得た知識。", "失敗から得た経験。", "自分との約束を守った回数。"] },
+    { lines: ["そのすべてが、", "現実世界のあなたを作っていきます。"] },
+    { lines: ["あなたの人生に、", "決められた攻略ルートはありません。"] },
+    { lines: ["どこへ向かうのか。", "何を手に入れるのか。", "途中で立ち止まるのか。", "もう一度進むのか。"] },
+    { lines: ["そのすべてを決めるのは、", "あなたです。"], emphasis: true },
+    { lines: ["あなたは、", "誰かの物語を進めるためのNPCではありません。"] },
+    { lines: ["あなた自身の人生を操作する、", "唯一のプレイヤーです。"], emphasis: true },
+    { lines: ["今日、あなたは宣言しました。", `「${goalLine}のために、攻略を続ける」と。`] },
+    { lines: ["苦しくなったときは、", "今日の言葉を思い出してください。"] },
+    { lines: ["完璧である必要はありません。", "一度止まっても構いません。"] },
+    { lines: ["ただし、", "自分の人生の操作権だけは、", "手放さないでください。"], emphasis: true },
+    { lines: ["私は、この世界の設計者です。", "ですが、あなたの人生を設計できるのは、", "あなただけです。"] },
+    { lines: [`PLAYER ${name}。`, "あなたの最初の選択を、記録します。"] },
+    { lines: ["さあ。", "自分の人生を始めてください。"], emphasis: true }
+  ];
+  for (const g of groups) {
+    renderOnbLines(container, g.lines, g.emphasis);
+    await waitOrSkip(stepEl, g.lines.length * 500 + 1300);
+  }
+
+  container.innerHTML = "";
+  const btn = document.getElementById("onb-mission-start");
+  btn.hidden = false;
+  playDiveCompleteSound();
+  await waitForOnbButton("onb-mission-start");
+  btn.hidden = true;
+}
+
+// メイン画面への移行演出：MISSION START→粒子の中に本人の言葉が
+// 一瞬ずつ浮かぶ→収束→重低音→白転（WELCOMEメッセージ）→メイン画面
+async function playOnboardingFinaleTransition(name, s) {
+  const overlay = document.getElementById("dive-connecting-overlay");
+  const text = document.getElementById("dive-connecting-text");
+  const player = document.getElementById("dive-sync-player");
+  const whiteoutText = document.getElementById("dive-whiteout-text");
+
+  player.textContent = name;
+  text.textContent = "MISSION START";
+  overlay.hidden = false;
+  void overlay.offsetWidth;
+  overlay.classList.add("show", "syncing");
+  playDiveSyncSound();
+  await waitOrSkip(overlay, 1000);
+
+  // 登録した「目的」「理由」「未来像」が粒子の中に一瞬ずつ表示される
+  const flashes = [Array.from(s.goalTags)[0], s.reason, s.identity].filter(Boolean);
+  for (const line of flashes) {
+    text.textContent = line;
+    await waitOrSkip(overlay, 900);
+  }
+
+  overlay.classList.remove("syncing");
+  overlay.classList.add("converging");
+  playDeepImpactSound();
+  await waitOrSkip(overlay, 450);
+
+  overlay.classList.add("whiteout");
+  whiteoutText.innerHTML = "";
+  ["人生の操作権を確認。", `WELCOME, PLAYER ${name}.`].forEach((line, i) => {
+    const p = document.createElement("p");
+    p.style.animationDelay = `${i * 0.5}s`;
+    p.textContent = line;
+    whiteoutText.appendChild(p);
+  });
+  whiteoutText.hidden = false;
+  await waitOrSkip(overlay, 2200);
+  whiteoutText.hidden = true;
+
+  showScreen("screen-start");
+  overlay.classList.remove("show", "converging", "whiteout");
+  setTimeout(() => { overlay.hidden = true; }, 350);
 }
 
 // 接続完了演出（粒子収束→白転→画面切り替え）。ログイン時・初回登録完了時の
@@ -2164,6 +2500,28 @@ function beginQuizSession() {
 
   showScreen("screen-quiz");
   renderQuestion();
+  showGoalConnectionToast(); // 今日の一歩を、初回登録時の「変えたい未来」に接続する
+}
+
+// 任務開始時に、初回登録で宣言した目的とのつながりを一言だけ表示する
+// （初回登録前のユーザーや目的未登録の場合は何も出さない）
+function showGoalConnectionToast() {
+  if (!currentUserRecord) return;
+  const goal =
+    (currentUserRecord.goalTags && currentUserRecord.goalTags[0]) ||
+    currentUserRecord.contractGoal || "";
+  if (!goal) return;
+  const toast = document.getElementById("streak-toast");
+  if (!toast) return;
+  toast.textContent = `今日の一歩は「${goal}」という目的に接続されています`;
+  toast.hidden = false;
+  void toast.offsetWidth;
+  toast.classList.add("show");
+  clearTimeout(streakToastTimer);
+  streakToastTimer = setTimeout(() => {
+    toast.classList.remove("show");
+    setTimeout(() => { toast.hidden = true; }, 300);
+  }, 2800);
 }
 
 // このセッションのEXP積算・コンボボーナス・10問ボーナスの付与状況をリセットする

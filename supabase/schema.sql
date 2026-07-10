@@ -66,6 +66,10 @@ create table if not exists users (
   goal_reason text,
   commitment_cadence text,
   resolve_percent int,
+  current_position text,
+  future_identity text,
+  first_area text,
+  contract_goal text,
   created_at timestamptz not null default now()
 );
 
@@ -152,7 +156,8 @@ returns table (
   current_streak int, best_streak int, total_answered int, total_correct int,
   level int, exp int, total_exp int, streak_days int,
   today_best_score int, today_best_rate int,
-  onboarding_completed boolean, goal_reason text
+  onboarding_completed boolean, goal_reason text,
+  goal_tags text[], contract_goal text
 )
 language plpgsql
 security definer
@@ -204,16 +209,21 @@ begin
            v_user.current_streak, v_user.best_streak, v_user.total_answered, v_user.total_correct,
            v_user.level, v_user.exp, v_user.total_exp, v_user.streak_days,
            v_user.today_best_score, v_user.today_best_rate,
-           v_user.onboarding_completed, v_user.goal_reason;
+           v_user.onboarding_completed, v_user.goal_reason,
+           v_user.goal_tags, v_user.contract_goal;
 end;
 $$;
 
 -- ================================================================
--- RPC: 初回登録ヒアリング（変えたい未来／理由／継続方法／覚悟）を保存する
+-- RPC: 初回登録の儀式で集めた内容を保存する
+-- （現在地／変えたい未来／理由／未来像／攻略領域／継続方法／覚悟／契約の一文）
 -- ================================================================
+drop function if exists rpc_save_onboarding(uuid, text[], text, text, int);
 create or replace function rpc_save_onboarding(
   p_user_id uuid, p_goal_tags text[], p_goal_reason text,
-  p_commitment_cadence text, p_resolve_percent int
+  p_commitment_cadence text, p_resolve_percent int,
+  p_current_position text, p_future_identity text,
+  p_first_area text, p_contract_goal text
 )
 returns void
 language sql
@@ -224,6 +234,10 @@ as $$
     goal_reason = nullif(trim(p_goal_reason), ''),
     commitment_cadence = p_commitment_cadence,
     resolve_percent = greatest(0, least(100, p_resolve_percent)),
+    current_position = p_current_position,
+    future_identity = p_future_identity,
+    first_area = p_first_area,
+    contract_goal = nullif(trim(p_contract_goal), ''),
     onboarding_completed = true
   where u.id = p_user_id;
 $$;

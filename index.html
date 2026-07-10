@@ -7,7 +7,7 @@
 <!-- style.css / script.js を編集したら ?v= の数字を必ず増やすこと。
      増やさないと、ブラウザにキャッシュされた古いファイルが
      読み込まれ続け、コード修正がユーザーの端末に反映されないため。 -->
-<link rel="stylesheet" href="style.css?v=26">
+<link rel="stylesheet" href="style.css?v=27">
 </head>
 <body>
 
@@ -91,8 +91,11 @@
     <p id="dive-connecting-text" class="dive-connecting-text">仮想訓練空間へ接続中...</p>
   </div>
   <p id="dive-skip-hint" class="dive-skip-hint">タップでスキップ</p>
-  <!-- 接続完了直前：粒子（リング）が中心へ収束し、白転してからメイン画面が現れる -->
-  <div class="dive-whiteout" aria-hidden="true"></div>
+  <!-- 接続完了直前：粒子（リング）が中心へ収束し、白転してからメイン画面が現れる。
+       初回登録の締めでは、白転の中にWELCOMEメッセージを一瞬表示する -->
+  <div class="dive-whiteout" aria-hidden="true">
+    <div id="dive-whiteout-text" class="dive-whiteout-text" hidden></div>
+  </div>
 </div>
 
 <!-- LEVEL UP / TITLE UPGRADE演出（結果画面でのみ表示） -->
@@ -151,56 +154,127 @@
   </section>
 
   <!-- ============================================================
-       初回登録：簡易ヒアリング＋チュートリアル（新規プレイヤーのみ表示）
+       初回登録：「人生の操作権を取り戻すログイン儀式」（新規プレイヤーのみ表示）
+       PROLOGUE→現在地→変えたい未来→理由→未来像→攻略領域→識別名確認→
+       継続方法→覚悟→PLAYER CONTRACT→登録演出→最終演説→MISSION START
+       の順で進む。進行はscript.jsのrunOnboardingSequence()が制御する。
   ============================================================= -->
   <section id="screen-onboarding" class="screen onboarding-screen">
     <div class="onboarding-inner">
 
-      <div class="onb-step onb-step-prologue" data-onb-step="prologue">
-        <div class="onb-prologue-lines" id="onb-prologue-lines"></div>
-        <p class="onb-skip-hint" id="onb-prologue-skip">タップで進む</p>
+      <!-- PROLOGUE・各ステップ間のメッセージ演出（共用。タップで早送り） -->
+      <div class="onb-step onb-step-message" data-onb-step="message">
+        <div class="onb-prologue-lines" id="onb-message-lines"></div>
+        <p class="onb-skip-hint" id="onb-message-hint" hidden>タップで進む</p>
       </div>
 
+      <!-- STEP 1：現在地の認識 -->
+      <div class="onb-step" data-onb-step="position" hidden>
+        <p class="onb-step-label">STEP 1 / 9</p>
+        <h2 class="onb-step-title">現在地の確認</h2>
+        <p class="onb-step-lead">最初に、現在のあなたについて確認します。今の自分は、理想の自分にどれくらい近づいていますか？</p>
+        <div class="onb-cadence-list" id="onb-position-list"></div>
+        <button type="button" class="dive-btn-primary onb-next-btn" id="onb-position-next" disabled>次へ</button>
+      </div>
+
+      <!-- STEP 2：変えたい未来（学習内容より先に、現実の目的を聞く） -->
       <div class="onb-step" data-onb-step="goals" hidden>
-        <p class="onb-step-label">STEP 1 / 3</p>
+        <p class="onb-step-label">STEP 2 / 9</p>
         <h2 class="onb-step-title">変えたい未来</h2>
-        <p class="onb-step-lead">今のあなたが、本当に変えたいと思っていることは？（複数選択可）</p>
+        <p class="onb-step-lead">あなたがこの訓練を続けた先で、現実世界の何を変えたいですか？（複数選択可）</p>
         <div class="onb-goal-grid" id="onb-goal-grid"></div>
-        <p class="onb-step-lead onb-sub-lead">なぜ、その未来を手に入れたいですか？</p>
-        <textarea id="onb-reason-input" class="onb-textarea" rows="3" placeholder="（任意）今のあなたの言葉で、少しだけ書いてみてください"></textarea>
-        <p class="onb-affirm-text" id="onb-goals-affirm"></p>
-        <button type="button" class="dive-btn-primary onb-next-btn" id="onb-goals-next">次へ</button>
+        <button type="button" class="dive-btn-primary onb-next-btn" id="onb-goals-next" disabled>次へ</button>
       </div>
 
-      <div class="onb-step" data-onb-step="commit" hidden>
-        <p class="onb-step-label">STEP 2 / 3</p>
-        <h2 class="onb-step-title">未来のあなたとの約束</h2>
-        <p class="onb-step-lead">どのくらいのペースで、この訓練を続けますか？</p>
+      <!-- STEP 3：なぜその未来を望むのか（本人の言葉で残す。継続の核） -->
+      <div class="onb-step" data-onb-step="reason" hidden>
+        <p class="onb-step-label">STEP 3 / 9</p>
+        <h2 class="onb-step-title">この訓練を続ける理由</h2>
+        <p class="onb-step-lead">では、もう一つだけ教えてください。なぜ、その未来を手に入れたいのですか？</p>
+        <textarea id="onb-reason-input" class="onb-textarea" rows="3" placeholder="あなた自身の言葉で入力してください"></textarea>
+        <p class="onb-step-lead onb-reason-helper">うまく書く必要はありません。誰のためなのか。何を変えたいのか。今のままでは、なぜ嫌なのか。</p>
+        <p class="onb-affirm-text" id="onb-reason-warn"></p>
+        <button type="button" class="dive-btn-primary onb-next-btn" id="onb-reason-next">次へ</button>
+      </div>
+
+      <!-- STEP 4：未来のプレイヤー像 -->
+      <div class="onb-step" data-onb-step="identity" hidden>
+        <p class="onb-step-label">STEP 4 / 9</p>
+        <h2 class="onb-step-title">未来のプレイヤー像</h2>
+        <p class="onb-step-lead">この世界を攻略した先で、あなたは、どのようなプレイヤーになっていたいですか？</p>
+        <div class="onb-cadence-list" id="onb-identity-list"></div>
+        <button type="button" class="dive-btn-primary onb-next-btn" id="onb-identity-next" disabled>次へ</button>
+      </div>
+
+      <!-- STEP 5：最初に攻略する領域（＝学習ジャンル。成長ルートとして扱う） -->
+      <div class="onb-step" data-onb-step="area" hidden>
+        <p class="onb-step-label">STEP 5 / 9</p>
+        <h2 class="onb-step-title">最初の攻略領域</h2>
+        <p class="onb-step-lead">未来へ到達するために、最初に攻略する領域を選択してください。</p>
+        <div class="onb-goal-grid" id="onb-area-list"></div>
+        <button type="button" class="dive-btn-primary onb-next-btn" id="onb-area-next" disabled>次へ</button>
+      </div>
+
+      <!-- STEP 6（識別名の確認）はメッセージ演出で行う（プレイヤーIDは接続時に登録済みのため） -->
+
+      <!-- STEP 7：継続方法（覚悟だけでなく、現実的なペースを自分で選ぶ） -->
+      <div class="onb-step" data-onb-step="cadence" hidden>
+        <p class="onb-step-label">STEP 7 / 9</p>
+        <h2 class="onb-step-title">継続方法</h2>
+        <p class="onb-step-lead">未来を変えるのは、一度の大きな決意ではありません。小さな行動を、何度も選び続けることです。あなたは、どのペースで攻略を続けますか？</p>
         <div class="onb-cadence-list" id="onb-cadence-list"></div>
-        <p class="onb-step-lead onb-sub-lead">今の「本気度」を教えてください</p>
+        <button type="button" class="dive-btn-primary onb-next-btn" id="onb-cadence-next" disabled>次へ</button>
+      </div>
+
+      <!-- STEP 8：覚悟の確認（どの数値でも否定しない） -->
+      <div class="onb-step" data-onb-step="resolve" hidden>
+        <p class="onb-step-label">STEP 8 / 9</p>
+        <h2 class="onb-step-title">覚悟の確認</h2>
+        <p class="onb-step-lead">今回のダイブに、どれほどの覚悟を持っていますか？</p>
         <input type="range" id="onb-resolve-slider" class="onb-slider" min="0" max="100" step="5" value="50">
         <p class="onb-resolve-value" id="onb-resolve-value">50%</p>
-        <p class="onb-affirm-text" id="onb-resolve-affirm"></p>
-        <button type="button" class="dive-btn-primary onb-next-btn" id="onb-commit-next">次へ</button>
+        <button type="button" class="dive-btn-primary onb-next-btn" id="onb-resolve-next">次へ</button>
       </div>
 
+      <!-- STEP 8b：100%を選んだ場合だけの再確認 -->
+      <div class="onb-step" data-onb-step="resolve-confirm" hidden>
+        <div class="onb-contract-box">
+          <p>本当に100%ですか？</p>
+          <p>この世界では、宣言ではなく行動が記録されます。</p>
+          <p>それでも、100%を選択しますか？</p>
+        </div>
+        <button type="button" class="dive-btn-primary onb-next-btn" id="onb-resolve-yes">はい、100%です</button>
+        <button type="button" class="onb-back-btn" id="onb-resolve-back">考え直す</button>
+      </div>
+
+      <!-- STEP 9：PLAYER CONTRACT -->
       <div class="onb-step" data-onb-step="contract" hidden>
-        <p class="onb-step-label">STEP 3 / 3</p>
+        <p class="onb-step-label">STEP 9 / 9</p>
         <h2 class="onb-step-title">PLAYER CONTRACT</h2>
         <div class="onb-contract-box">
           <p>私は、自分の人生を誰かに委ねません。</p>
           <p>失敗を恐れず、経験として記録します。</p>
-          <p>この世界では、すべての経験が自動的に記録されます。成功も。失敗も。立ち止まった時間さえも。</p>
-          <p>あなたが再び進む限り、すべてが成長データになります。</p>
+          <p>完璧でなくても、再び立ち上がります。</p>
+          <p>自分で選んだ目的のために、今日できる一歩を積み重ねます。</p>
+          <p>私は、自分の人生のプレイヤーです。</p>
         </div>
-        <p class="onb-player-confirm" id="onb-player-confirm"></p>
+        <p class="onb-step-lead onb-sub-lead">最後の一文を、あなたの言葉で完成させてください。（任意）</p>
+        <div class="onb-contract-fill">
+          <span>私は、</span><input type="text" id="onb-contract-input" class="onb-contract-input" placeholder="________" maxlength="40" autocomplete="off"><span>のために攻略を続ける。</span>
+        </div>
+        <p class="onb-contract-note">この世界では、すべての経験が自動的に記録されます。成功も。失敗も。立ち止まった時間さえも。あなたが再び進む限り、すべてが成長データになります。</p>
         <button type="button" class="dive-btn-primary onb-contract-btn" id="onb-contract-submit">自分の人生にログインする</button>
       </div>
 
-      <div class="onb-step" data-onb-step="tutorial" hidden>
-        <p class="onb-step-label">TUTORIAL</p>
-        <div class="onb-tutorial-cards" id="onb-tutorial-cards"></div>
-        <button type="button" class="dive-btn-primary onb-next-btn" id="onb-tutorial-next">はじめる</button>
+      <!-- プレイヤー登録演出（入力内容を順番に表示→システムログ→操作権移行） -->
+      <div class="onb-step" data-onb-step="registration" hidden>
+        <div class="onb-registration-lines" id="onb-registration-lines"></div>
+      </div>
+
+      <!-- 最終演説→MISSION START -->
+      <div class="onb-step onb-step-message" data-onb-step="speech" hidden>
+        <div class="onb-prologue-lines" id="onb-speech-lines"></div>
+        <button type="button" class="onb-mission-start-btn" id="onb-mission-start" hidden>MISSION START</button>
       </div>
 
     </div>
@@ -515,6 +589,6 @@
 
 </div>
 
-<script src="script.js?v=28"></script>
+<script src="script.js?v=30"></script>
 </body>
 </html>
