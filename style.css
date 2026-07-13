@@ -38,6 +38,14 @@
 
 html, body {
   margin: 0;
+  /* 画面上端での下スワイプによるpull-to-refresh（ページ再読み込みで
+     ログイン画面へ戻ってしまう）と、端のラバーバンドでページ外の
+     白い領域が見えてしまうのを、全画面で常に防ぐ */
+  overscroll-behavior: none;
+}
+html {
+  /* ラバーバンド時に見えるページ外領域も世界観と同じ暗色にしておく */
+  background: #020409;
 }
 body {
   font-family: "Hiragino Sans", "Yu Gothic", "Segoe UI", sans-serif;
@@ -755,7 +763,8 @@ body.dive-active {
   border: 1px solid rgba(34, 227, 255, 0.35);
   background: rgba(3, 6, 16, 0.7);
   color: #e7edff;
-  font-size: 0.92rem;
+  /* 16px未満だとiOS等がフォーカス時に自動ズームしてしまうため必ず1rem以上にする */
+  font-size: 1rem;
   font-family: inherit;
   outline: none;
   resize: vertical;
@@ -843,7 +852,8 @@ body.dive-active {
   border-bottom: 1.5px solid rgba(34, 227, 255, 0.5);
   background: transparent;
   color: #7ef1ff;
-  font-size: 0.95rem;
+  /* 16px未満だとiOS等がフォーカス時に自動ズームしてしまうため必ず1rem以上にする */
+  font-size: 1rem;
   font-weight: bold;
   text-align: center;
   outline: none;

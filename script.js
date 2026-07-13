@@ -1001,6 +1001,20 @@ function playDiveCompleteSound() {
   playTone(1046.5, 0.1, 0.4, "sine", 0.22);
 }
 
+// 選択肢をタップした瞬間の認識音。装飾のない短い純音のクリックで、
+// 「システムが入力を検知した」ことだけを冷静に伝える
+function playSelectSound() {
+  playTone(1567.98, 0, 0.045, "sine", 0.12);
+  playTone(2093.0, 0.028, 0.05, "sine", 0.07);
+}
+
+// 選択を「確定」した瞬間のアクノリッジ音。低→高の二音で
+// 「受理・記録した」ことを示す、戦略システム風の応答音
+function playConfirmSound() {
+  playTone(1046.5, 0, 0.07, "triangle", 0.16);
+  playTone(1567.98, 0.07, 0.12, "triangle", 0.14);
+}
+
 // ---- 紙吹雪演出 ----
 const CONFETTI_COLORS = ["#22e3ff", "#ff31d8", "#3dffa0", "#7b2ff7", "#f2c94c", "#7ef1ff"];
 
@@ -1688,6 +1702,7 @@ function buildOnbSelectList(containerId, options, onSelect) {
     btn.addEventListener("click", () => {
       list.querySelectorAll(".onb-cadence-option").forEach((el) => el.classList.remove("selected"));
       btn.classList.add("selected");
+      playSelectSound();
       onSelect(label);
     });
     list.appendChild(btn);
@@ -1719,6 +1734,7 @@ function buildOnbChips(containerId, options, multi, onChange) {
         selected.add(label);
         chip.classList.add("selected");
       }
+      playSelectSound();
       onChange(selected);
     });
     grid.appendChild(chip);
@@ -1760,13 +1776,16 @@ async function playOnbMessage(groups) {
   hint.hidden = true;
 }
 
-// 指定ボタンがクリックされる（かつvalidateを通る）まで待つ
+// 指定ボタンがクリックされる（かつvalidateを通る）まで待つ。
+// 確定が受理された瞬間にアクノリッジ音を鳴らし、
+// 「システム側が認識した」ことをユーザーへ伝える
 function waitForOnbButton(btnId, validate) {
   return new Promise((resolve) => {
     const btn = document.getElementById(btnId);
     const handler = () => {
       if (validate && !validate()) return;
       btn.removeEventListener("click", handler);
+      playConfirmSound();
       resolve();
     };
     btn.addEventListener("click", handler);
@@ -1780,6 +1799,7 @@ function waitForOnbChoice(btnIds) {
       const btn = document.getElementById(id);
       const handler = () => {
         entries.forEach(([b, h]) => b.removeEventListener("click", h));
+        playConfirmSound();
         resolve(id);
       };
       btn.addEventListener("click", handler);
@@ -2252,6 +2272,7 @@ function setupStartScreen() {
       modeButtons.forEach((b) => b.classList.remove("selected"));
       btn.classList.add("selected");
       state.mode = btn.dataset.mode;
+      playSelectSound();
       populateCategorySelect();
       validateStartButton();
     });
@@ -2263,6 +2284,7 @@ function setupStartScreen() {
       countButtons.forEach((b) => b.classList.remove("selected"));
       btn.classList.add("selected");
       state.countOption = btn.dataset.count;
+      playSelectSound();
       validateStartButton();
     });
   });
@@ -2273,11 +2295,13 @@ function setupStartScreen() {
       levelButtons.forEach((b) => b.classList.remove("selected"));
       btn.classList.add("selected");
       state.level = btn.dataset.level;
+      playSelectSound();
     });
   });
 
   document.getElementById("category-select").addEventListener("change", (e) => {
     state.category = e.target.value;
+    playSelectSound();
   });
 
   document.getElementById("btn-start").addEventListener("click", beginQuizSession);
@@ -2321,6 +2345,7 @@ function setupRankingTabs() {
       tabButtons.forEach((b) => b.classList.remove("selected"));
       btn.classList.add("selected");
       currentRankingType = btn.dataset.ranking;
+      playSelectSound();
       document.getElementById("ranking-sub").textContent = RANKING_SUBCOPY[currentRankingType] || "";
       renderRankingScreen();
     });
@@ -2489,6 +2514,7 @@ function beginQuizSession() {
     return;
   }
   document.getElementById("start-warning").textContent = "";
+  playConfirmSound(); // 任務条件の確定をシステムが受理したことを伝える
 
   const n = state.countOption === "all" ? pool.length : Math.min(Number(state.countOption), pool.length);
   state.sessionQuestions = pickSessionQuestions(pool, n, state.mode);
@@ -2688,6 +2714,7 @@ function renderChoices(choices) {
       container.querySelectorAll(".choice-btn").forEach((b) => b.classList.remove("selected"));
       btn.classList.add("selected");
       state.selectedChoice = choiceText;
+      playSelectSound();
       document.getElementById("btn-answer").disabled = false;
     });
 

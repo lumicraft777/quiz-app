@@ -2,12 +2,14 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- maximum-scale=1で、入力欄フォーカス時の自動ズーム（MISSION START後に
+     画面が拡大されたままになる原因）を防ぐ。UIの大枠を固定して没入感を保つ -->
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>蓄電池メーカー比較クイズ｜営業判断力トレーニング</title>
 <!-- style.css / script.js を編集したら ?v= の数字を必ず増やすこと。
      増やさないと、ブラウザにキャッシュされた古いファイルが
      読み込まれ続け、コード修正がユーザーの端末に反映されないため。 -->
-<link rel="stylesheet" href="style.css?v=27">
+<link rel="stylesheet" href="style.css?v=28">
 </head>
 <body>
 
@@ -589,6 +591,6 @@
 
 </div>
 
-<script src="script.js?v=30"></script>
+<script src="script.js?v=31"></script>
 </body>
 </html>
