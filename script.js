@@ -856,6 +856,7 @@ async function fetchRanking() {
 // 攻略者ボードの種類ごとに異なるRPCを呼ぶ（総合以外は既存のソートロジックには一切触れない）
 const RANKING_FETCHERS = {
   overall: () => supabaseRpc("rpc_get_ranking", {}),
+  streak: () => supabaseRpc("rpc_get_streak_ranking", {}),
   weekly: () => supabaseRpc("rpc_get_weekly_ranking", {}),
   monthly: () => supabaseRpc("rpc_get_monthly_ranking", {}),
   combo: () => supabaseRpc("rpc_get_combo_ranking", {}),
@@ -1309,8 +1310,8 @@ function spawnTunnelFrag(w, h) {
 
 function resizeCyberTunnel() {
   const t = cyberTunnel;
-  // Retina等ではdprをそのまま使うと描画面積が跳ね上がるため1.5に制限する
-  const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+  // Retina等ではdprをそのまま使うと描画面積が跳ね上がり負荷が大きいため1.2に制限する
+  const dpr = Math.min(window.devicePixelRatio || 1, 1.2);
   t.w = window.innerWidth;
   t.h = window.innerHeight;
   t.canvas.width = Math.round(t.w * dpr);
@@ -1320,16 +1321,16 @@ function resizeCyberTunnel() {
   t.cy = t.h * 0.46; // 消失点は中央より少し上（.cyber-bg-coreの位置と揃える）
   t.scale = Math.min(t.w, t.h) * 0.9;
 
-  // 要素数は画面サイズに応じて控えめに（スマホでも安定して動くように）
-  const streakCount = Math.max(40, Math.min(80, Math.round((t.w * t.h) / 28000)));
+  // アプリ全体が重くならないよう要素数を抑える（あくまで控えめなアンビエント演出とする）
+  const streakCount = Math.max(14, Math.min(26, Math.round((t.w * t.h) / 70000)));
   t.streaks = Array.from({ length: streakCount }, () => spawnTunnelStreak(true));
-  t.wires = Array.from({ length: 5 }, () => {
+  t.wires = Array.from({ length: 2 }, () => {
     const wire = spawnTunnelWire(t.w, t.h);
     wire.life = Math.random() * wire.ttl; // 初期状態から表示タイミングをばらす
     return wire;
   });
-  t.dots = Array.from({ length: 20 }, () => spawnTunnelDot(t.w, t.h));
-  t.frags = Array.from({ length: 4 }, () => spawnTunnelFrag(t.w, t.h));
+  t.dots = Array.from({ length: 9 }, () => spawnTunnelDot(t.w, t.h));
+  t.frags = Array.from({ length: 2 }, () => spawnTunnelFrag(t.w, t.h));
 }
 
 function drawCyberTunnelFrame(dt, time) {
@@ -1352,19 +1353,13 @@ function drawCyberTunnelFrame(dt, time) {
     const y2 = t.cy + s.y * k2;
 
     // 手前ほど太く明るく、奥ほど細く暗く（消失点の光へ収束していく）
-    let alpha = Math.min(0.75, 0.85 / s.z);
+    let alpha = Math.min(0.7, 0.85 / s.z);
     if (s.inward) alpha *= Math.max(0, 1.4 - s.z * 0.15);
     if (s.flicker) alpha *= 0.55 + 0.45 * Math.sin(time * 6 + s.phase);
     if (alpha <= 0.01) return;
-    const width = Math.min(2.4, Math.max(0.4, 2.0 / s.z));
+    const width = Math.min(2.2, Math.max(0.4, 2.0 / s.z));
 
-    // 2度描き（太い低透明＋細い本線）で軽量なグロー表現にする
-    ctx.strokeStyle = `rgba(${s.color}, ${alpha * 0.22})`;
-    ctx.lineWidth = width + 2.5;
-    ctx.beginPath();
-    ctx.moveTo(x1, y1);
-    ctx.lineTo(x2, y2);
-    ctx.stroke();
+    // 描画コストを抑えるため一度描きのみにする（二重描きのグローは行わない）
     ctx.strokeStyle = `rgba(${s.color}, ${alpha})`;
     ctx.lineWidth = width;
     ctx.beginPath();
@@ -1439,13 +1434,22 @@ function drawCyberTunnelFrame(dt, time) {
   });
 }
 
+// 単なる背景の飾りであり操作の主役ではないため、60fpsではなく
+// 約24fpsに間引いて描画する。UI操作の有無には一切連動させず、
+// 常に一定のゆるいペースで独立して流れ続けるだけにする
+const CYBER_TUNNEL_FRAME_INTERVAL = 1 / 24;
+
 function cyberTunnelLoop(timestamp) {
   const t = cyberTunnel;
   if (!t.lastTime) t.lastTime = timestamp;
   // タブ復帰直後などの巨大なdtで要素がワープしないよう上限を設ける
   const dt = Math.min((timestamp - t.lastTime) / 1000, 0.05);
+  t.frameAccum = (t.frameAccum || 0) + dt;
   t.lastTime = timestamp;
-  drawCyberTunnelFrame(dt, timestamp / 1000);
+  if (t.frameAccum >= CYBER_TUNNEL_FRAME_INTERVAL) {
+    drawCyberTunnelFrame(t.frameAccum, timestamp / 1000);
+    t.frameAccum = 0;
+  }
   t.rafId = requestAnimationFrame(cyberTunnelLoop);
 }
 
@@ -1466,6 +1470,22 @@ function stopCyberTunnel() {
     cancelAnimationFrame(cyberTunnel.rafId);
     cyberTunnel.rafId = null;
   }
+}
+
+// 入力欄フォーカス時にiOS等が画面をズームし、フォーカスを外した後も
+// ズームしたままになってしまう端末があるため、入力欄からフォーカスが
+// 外れるたびにviewportメタタグを一度再適用してズームを1倍へ強制的に
+// リセットする（font-sizeを16px以上にする対策だけでは防ぎきれない
+// ケースへの保険）
+function setupViewportZoomGuard() {
+  const viewport = document.querySelector('meta[name="viewport"]');
+  if (!viewport) return;
+  const baseContent = viewport.getAttribute("content");
+  document.addEventListener("focusout", (e) => {
+    if (!e.target.matches || !e.target.matches("input, textarea, select")) return;
+    viewport.setAttribute("content", baseContent + ", maximum-scale=1.0");
+    setTimeout(() => { viewport.setAttribute("content", baseContent); }, 80);
+  }, true);
 }
 
 function setupCyberTunnelBackground() {
@@ -1505,6 +1525,7 @@ function setupCyberTunnelBackground() {
 async function initApp() {
   loadSoundPreference();
   setupCyberTunnelBackground();
+  setupViewportZoomGuard();
   document.getElementById("btn-sound-toggle").addEventListener("click", toggleSound);
   setupUserScreen();
   setupStartScreen();
@@ -1974,11 +1995,17 @@ async function playOnbRegistration(name, s) {
   const box = document.getElementById("onb-registration-lines");
   box.innerHTML = "";
 
+  // 新しい行が追加されるたびに、その行が見える位置まで画面を追従させる
+  const scrollToLatest = (el) => {
+    el.scrollIntoView({ behavior: "smooth", block: "end" });
+  };
+
   const addLine = async (text, cls, hold) => {
     const p = document.createElement("p");
     p.className = cls;
     p.textContent = text;
     box.appendChild(p);
+    scrollToLatest(p);
     await waitOrSkip(stepEl, hold);
   };
 
@@ -2004,6 +2031,7 @@ async function playOnbRegistration(name, s) {
     wrap.appendChild(l);
     wrap.appendChild(v);
     box.appendChild(wrap);
+    scrollToLatest(wrap);
     playTone(880, 0, 0.05, "square", 0.05); // 1件登録されるたびの小さな確定音
     await waitOrSkip(stepEl, 450);
   }
@@ -2352,6 +2380,7 @@ let currentRankingType = "overall";
 
 const RANKING_SUBCOPY = {
   overall: "正答率が高い順に表示しています（上位100名）",
+  streak: "毎日欠かさずログインしている日数が多い順に表示しています（上位100名）",
   weekly: "直近7日間の正解数が多い順に表示しています（上位100名）",
   monthly: "直近30日間の正解数が多い順に表示しています（上位100名）",
   combo: "最大コンボ数が多い順に表示しています（上位100名）",
@@ -2382,10 +2411,23 @@ function buildRankingRowRankClass(rank) {
   return `${rankClass} ${sizeClass}`.trim();
 }
 
+// "YYYY-MM-DD" 形式の日付文字列を「M月D日」に変換する（欠損時は「-」）
+function formatDateJp(dateStr) {
+  if (!dateStr) return "-";
+  const m = String(dateStr).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return "-";
+  return `${Number(m[2])}月${Number(m[3])}日`;
+}
+
 // 攻略者ボードのタブごとに、表示する見出し行・詳細行の中身を組み立てる
 function buildRankingStatsLines(type, row) {
   const levelLine = `Lv.${row.level ?? 1} ${getLevelTitle(row.level ?? 1)} ／ 累計EXP ${(row.total_exp ?? 0).toLocaleString()}`;
   switch (type) {
+    case "streak":
+      return {
+        headline: `連続ログイン ${row.streak_days}日`,
+        detail: [`最終ログイン：${formatDateJp(row.last_active_date)}`, levelLine]
+      };
     case "weekly":
       return {
         headline: `今週の正解数 ${row.weekly_correct}問`,

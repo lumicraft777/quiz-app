@@ -664,6 +664,20 @@ $$;
 -- ================================================================
 -- 複数ランキングRPC（既存のrpc_get_ranking＝総合攻略者ボードは変更しない）
 -- ================================================================
+-- 「毎日触れているか」を可視化するための継続日数ランキング。
+-- streak_daysが同じ場合は直近ログインの新しい順にする
+create or replace function rpc_get_streak_ranking()
+returns table (username text, streak_days int, last_active_date date, level int, total_exp int)
+language sql
+security definer
+as $$
+  select username, streak_days, last_active_date, level, total_exp
+  from users
+  where streak_days > 0
+  order by streak_days desc, last_active_date desc nulls last
+  limit 100;
+$$;
+
 create or replace function rpc_get_weekly_ranking()
 returns table (username text, weekly_correct int, weekly_answered int, level int, total_exp int)
 language sql

@@ -53,6 +53,11 @@ body {
   color: var(--color-text);
   line-height: 1.6;
 }
+/* 16px未満だとiOS等がフォーカス時に自動ズームしてしまうため、
+   個別の指定漏れがあってもここで必ず16px以上を保証する（安全網） */
+input, textarea, select {
+  font-size: 16px;
+}
 
 /* ダイブ画面（ログイン画面）表示中は、上下左右のスワイプでページ自体が
    動く（＝端末のラバーバンド／オーバースクロールで背景の白が見えてしまう）
@@ -902,7 +907,10 @@ body.dive-active {
   min-height: calc(100dvh - 128px);
   display: flex;
   flex-direction: column;
-  justify-content: center;
+  /* 行が増えるにつれ画面追従スクロールさせるため、中央寄せではなく
+     上から積み上げていく配置にする（センタリングだと新しい行の位置が
+     不安定になり、スクロール先が定まらなくなるため） */
+  justify-content: flex-start;
   gap: 10px;
 }
 .onb-reg-header {
@@ -1197,7 +1205,9 @@ body.dive-active {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  margin: 4px 0 0;
+  /* 左上に固定表示される用語集アイコン（.dictionary-toggle）と
+     重なって見えづらくならないよう、その下に十分な余白を空ける */
+  margin: 48px 0 0;
   padding: 6px 12px;
   border-radius: 999px;
   border: 1px solid var(--color-border);
