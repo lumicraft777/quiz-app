@@ -40,6 +40,7 @@ const {
   generateConstructionQuestions,
   generateGridPolicyQuestions,
   generateLawQuestions,
+  generateOMQuestions,
   isUnknownValue
 } = require("../question-generator.js");
 
@@ -157,6 +158,11 @@ async function main() {
   const lawQuestions = generateLawQuestions();
   console.log(`  [関係法規] ${lawQuestions.length}問を生成`);
   knowledgeQuestions = knowledgeQuestions.concat(lawQuestions);
+
+  // 第7章 維持管理・O&M（製品データに依存しない静的問題）
+  const omQuestions = generateOMQuestions();
+  console.log(`  [維持管理・O&M] ${omQuestions.length}問を生成`);
+  knowledgeQuestions = knowledgeQuestions.concat(omQuestions);
 
   for (const conf of SHEET_CONFIG) {
     const products = await loadProductsFromSheet(conf);
