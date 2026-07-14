@@ -648,6 +648,37 @@ body.dive-active {
   margin: 12px 0 0;
   font-size: 0.82rem;
 }
+/* 「初めての方はこちら」：ログイン(ダイブ開始)とはっきり区別できるよう
+   塗りつぶしではなく輪郭線ボタンにする */
+.dive-new-player-block {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid rgba(34, 227, 255, 0.18);
+  text-align: center;
+}
+.dive-btn-secondary {
+  display: block;
+  width: 100%;
+  padding: 13px;
+  border: 1.5px solid var(--color-primary);
+  border-radius: 10px;
+  background: rgba(34, 227, 255, 0.06);
+  color: #7ef1ff;
+  font-size: 1rem;
+  font-weight: bold;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  transition: transform 0.15s, background 0.15s;
+}
+.dive-btn-secondary:active {
+  transform: scale(0.97);
+  background: rgba(34, 227, 255, 0.14);
+}
+.dive-new-player-hint {
+  margin: 8px 0 0;
+  font-size: 0.76rem;
+  color: var(--color-muted);
+}
 .dive-footnote {
   max-width: 380px;
   margin: 20px auto 0;
@@ -733,10 +764,7 @@ body.dive-active {
   letter-spacing: 0.08em;
   color: #7ef1ff;
   text-shadow: 0 0 10px rgba(34, 227, 255, 0.4);
-}
-/* 攻略領域ポップアップ内のリード文 */
-.area-popup-lead {
-  margin: 0;
+  white-space: pre-line;
 }
 .onb-step-title {
   margin: 0 0 14px;
@@ -834,6 +862,123 @@ body.dive-active {
   font-weight: bold;
   color: #7ef1ff;
   text-shadow: 0 0 14px rgba(34, 227, 255, 0.5);
+}
+/* 継続方法「自分で設定する」を選んだ時だけ現れる自由入力欄 */
+#onb-cadence-custom-wrap {
+  margin-top: 8px;
+}
+
+/* ---- 現在地チェック（3問の実診断） ---- */
+.onb-diag-time {
+  margin: 0 0 4px;
+  font-size: 0.78rem;
+  color: var(--color-muted);
+}
+.onb-diag-progress {
+  margin: 0 0 10px;
+  font-family: "Courier New", monospace;
+  font-size: 0.78rem;
+  letter-spacing: 0.1em;
+  color: var(--color-primary);
+}
+.onb-diag-question {
+  margin: 0 0 14px;
+  font-size: 1rem;
+  line-height: 1.7;
+  color: #e7edff;
+  white-space: pre-wrap;
+}
+.onb-diag-choices {
+  margin-bottom: 12px;
+}
+.onb-diag-choice {
+  display: block;
+  width: 100%;
+  padding: 12px 14px;
+  margin-bottom: 8px;
+  border-radius: 10px;
+  border: 1px solid rgba(34, 227, 255, 0.3);
+  background: rgba(12, 16, 36, 0.55);
+  color: #cdd8f2;
+  font-size: 0.9rem;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+.onb-diag-choice.selected {
+  border-color: var(--color-accent);
+  background: rgba(255, 49, 216, 0.16);
+  color: #ffe3fb;
+}
+.onb-diag-choice.correct {
+  border-color: var(--color-emerald);
+  background: rgba(61, 255, 160, 0.14);
+  color: #d6ffec;
+}
+.onb-diag-choice.incorrect {
+  border-color: #ff3d6e;
+  background: rgba(255, 61, 110, 0.12);
+  color: #ffd6e0;
+}
+.onb-diag-choice[disabled] {
+  cursor: default;
+}
+.onb-diag-feedback {
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: rgba(34, 227, 255, 0.06);
+  border: 1px solid var(--color-border, rgba(34, 227, 255, 0.2));
+  font-size: 0.86rem;
+  line-height: 1.7;
+  color: #cdd8f2;
+  margin: 0 0 14px;
+  white-space: pre-line;
+}
+/* 診断の選択肢は横並びチップ(.onb-goal-grid)ではなく縦積みにする */
+.onb-diag-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+/* ---- 現在地チェックの診断結果 ---- */
+.onb-diag-result-score {
+  margin: 0 0 10px;
+  font-family: "Courier New", monospace;
+  font-size: 0.95rem;
+  color: var(--color-primary);
+}
+.onb-diag-result-level {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: bold;
+  color: #7ef1ff;
+  text-align: center;
+}
+.onb-diag-result-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin: 14px 0;
+}
+.onb-diag-result-label {
+  margin: 0 0 4px;
+  font-size: 0.72rem;
+  color: var(--color-muted);
+}
+.onb-diag-result-value {
+  margin: 0;
+  font-size: 0.86rem;
+  line-height: 1.6;
+  color: #cdd8f2;
+}
+
+/* ---- 覚悟0%の隠し演出の選択肢 ---- */
+.onb-zero-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 20px;
 }
 .onb-next-btn, .onb-contract-btn {
   margin-top: 24px;
@@ -935,6 +1080,13 @@ body.dive-active {
   font-weight: bold;
   color: #e7edff;
 }
+.onb-reg-confirmed {
+  margin: 1px 0 0;
+  font-family: "Courier New", monospace;
+  font-size: 0.66rem;
+  letter-spacing: 0.1em;
+  color: var(--color-emerald);
+}
 .onb-reg-sys {
   margin: 0;
   font-size: 0.8rem;
@@ -949,6 +1101,7 @@ body.dive-active {
   color: #7ef1ff;
   text-shadow: 0 0 16px rgba(34, 227, 255, 0.6);
   animation: onb-line-fade-in 0.6s ease forwards;
+  white-space: pre-line;
 }
 /* 演説の締めに現れるMISSION STARTボタン */
 .onb-mission-start-btn {
@@ -1741,6 +1894,38 @@ body.dive-active {
    未学習日は暗いだけで責めるような赤色にはせず、学習量が多い日ほど
    シアンのエネルギーが蓄積されていくような表現にする。
    ============================================================= */
+
+/* ---- ホーム画面のおすすめ問題カード（初回登録の現在地チェック結果に基づく） ---- */
+.recommend-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  width: 100%;
+  padding: 14px 16px;
+  border-radius: var(--radius);
+  border: 1.5px solid var(--color-border);
+  background: linear-gradient(160deg, rgba(61, 255, 160, 0.1), rgba(61, 255, 160, 0.02));
+  color: var(--color-text);
+  cursor: pointer;
+  text-align: left;
+  transition: transform 0.12s ease, border-color 0.15s, box-shadow 0.15s;
+}
+.recommend-btn:active {
+  transform: scale(0.98);
+}
+.recommend-btn:hover {
+  border-color: var(--color-emerald);
+  box-shadow: 0 0 14px rgba(61, 255, 160, 0.2);
+}
+.recommend-btn-title {
+  font-size: 1rem;
+  font-weight: bold;
+}
+.recommend-btn-desc {
+  font-size: 0.78rem;
+  color: var(--color-muted);
+}
 
 /* ---- スタート画面のPLAYER LOG導線カード ---- */
 .pl-home-card { text-align: center; }

@@ -70,6 +70,14 @@ create table if not exists users (
   future_identity text,
   first_area text,
   contract_goal text,
+  -- 覚悟0%を正直に選んだプレイヤー用の隠しフラグ（ZERO TO ONE称号の条件に使う）
+  started_from_zero_resolve boolean not null default false,
+  -- 初回登録時の「現在地チェック」診断結果（3問の判定）
+  diagnostic_correct_count int,
+  diagnostic_level text,
+  diagnostic_strengths text[],
+  diagnostic_growth text[],
+  diagnostic_completed_at timestamptz,
   created_at timestamptz not null default now()
 );
 
@@ -122,6 +130,26 @@ create index if not exists quiz_sessions_user_date
 --   セッション作成に失敗しても回答記録そのものは止めない）
 alter table answer_history add column if not exists session_id uuid references quiz_sessions(id) on delete set null;
 create index if not exists answer_history_session on answer_history (session_id);
+
+-- ================================================================
+-- diagnostic_answers: 初回登録の「現在地チェック」（3問診断）の回答記録。
+-- 通常のクイズ（answer_history）とは完全に分け、正答率・ランキング・
+-- 通常のEXPには一切混ぜない。
+-- ================================================================
+create table if not exists diagnostic_answers (
+  id bigserial primary key,
+  user_id uuid not null references users(id) on delete cascade,
+  question_id text,
+  selected_answer text,
+  is_correct boolean,
+  category text,
+  difficulty text,
+  answered_at timestamptz not null default now(),
+  diagnostic_version int not null default 1
+);
+create index if not exists diagnostic_answers_user on diagnostic_answers (user_id);
+alter table diagnostic_answers enable row level security;
+-- ポリシーなし（RPC経由のみ）
 
 -- ================================================================
 -- glossary: 問題文中に出てくる専門用語の辞書（用語集機能で使用）
@@ -182,7 +210,9 @@ create policy "products are readable by anyone"
 --   下のRPC関数はsecurity definerなので、この制限を越えて動作できる）
 
 -- ================================================================
--- RPC 1: ログイン（未登録ユーザー名なら新規登録、既存ならPIN照合）
+-- RPC 1: ログイン（既存プレイヤーのみ。未登録IDは自動登録せず、
+--   「このプレイヤーは登録されていません」で明確に失敗させる。
+--   新規登録は rpc_register_player 経由の別フローに一本化した）
 -- ================================================================
 drop function if exists rpc_login(text, text);
 create or replace function rpc_login(p_username text, p_pin text)
@@ -192,7 +222,8 @@ returns table (
   level int, exp int, total_exp int, streak_days int,
   today_best_score int, today_best_rate int,
   onboarding_completed boolean, goal_reason text,
-  goal_tags text[], contract_goal text, first_area text
+  goal_tags text[], contract_goal text, first_area text,
+  diagnostic_level text, diagnostic_growth text[], diagnostic_strengths text[]
 )
 language plpgsql
 security definer
@@ -208,36 +239,34 @@ begin
   select * into v_user from users u where u.username = p_username;
 
   if v_user.id is null then
-    insert into users (username, pin_hash, last_active_date, streak_days, today_best_date, onboarding_completed)
-    values (p_username, crypt(p_pin, gen_salt('bf')), v_today, 1, v_today, false)
-    returning * into v_user;
-  else
-    if v_user.pin_hash <> crypt(p_pin, v_user.pin_hash) then
-      raise exception 'ユーザー名またはPINが正しくありません';
-    end if;
-
-    -- 連続ログイン日数（学習ストリーク）を計算する。同日中の複数回ログインでは増えない
-    if v_user.last_active_date is null or v_user.last_active_date < v_today - 1 then
-      v_user.streak_days := 1;
-    elsif v_user.last_active_date = v_today - 1 then
-      v_user.streak_days := v_user.streak_days + 1;
-    end if;
-
-    -- 「本日の自己ベスト」は日付が変わっていたらリセットする
-    if v_user.today_best_date is null or v_user.today_best_date < v_today then
-      v_user.today_best_score := 0;
-      v_user.today_best_rate := 0;
-      v_user.today_best_date := v_today;
-    end if;
-
-    update users u set
-      last_active_date = v_today,
-      streak_days = v_user.streak_days,
-      today_best_score = v_user.today_best_score,
-      today_best_rate = v_user.today_best_rate,
-      today_best_date = v_user.today_best_date
-    where u.id = v_user.id;
+    raise exception 'このプレイヤーは登録されていません';
   end if;
+
+  if v_user.pin_hash <> crypt(p_pin, v_user.pin_hash) then
+    raise exception 'ユーザー名またはPINが正しくありません';
+  end if;
+
+  -- 連続ログイン日数（学習ストリーク）を計算する。同日中の複数回ログインでは増えない
+  if v_user.last_active_date is null or v_user.last_active_date < v_today - 1 then
+    v_user.streak_days := 1;
+  elsif v_user.last_active_date = v_today - 1 then
+    v_user.streak_days := v_user.streak_days + 1;
+  end if;
+
+  -- 「本日の自己ベスト」は日付が変わっていたらリセットする
+  if v_user.today_best_date is null or v_user.today_best_date < v_today then
+    v_user.today_best_score := 0;
+    v_user.today_best_rate := 0;
+    v_user.today_best_date := v_today;
+  end if;
+
+  update users u set
+    last_active_date = v_today,
+    streak_days = v_user.streak_days,
+    today_best_score = v_user.today_best_score,
+    today_best_rate = v_user.today_best_rate,
+    today_best_date = v_user.today_best_date
+  where u.id = v_user.id;
 
   return query
     select v_user.id, v_user.username, v_user.best_score, v_user.best_rate,
@@ -245,7 +274,85 @@ begin
            v_user.level, v_user.exp, v_user.total_exp, v_user.streak_days,
            v_user.today_best_score, v_user.today_best_rate,
            v_user.onboarding_completed, v_user.goal_reason,
-           v_user.goal_tags, v_user.contract_goal, v_user.first_area;
+           v_user.goal_tags, v_user.contract_goal, v_user.first_area,
+           v_user.diagnostic_level, v_user.diagnostic_growth, v_user.diagnostic_strengths;
+end;
+$$;
+
+-- 新規登録フロー STEP1（プレイヤー名決め）でのリアルタイム重複チェック用。
+-- この時点ではまだアカウントを作らない（本登録は rpc_register_player で行う）
+create or replace function rpc_check_username_available(p_username text)
+returns boolean
+language sql
+security definer
+as $$
+  select not exists(select 1 from users u where u.username = p_username);
+$$;
+
+-- ================================================================
+-- RPC: 新規プレイヤー登録（初回登録フロー「PLAYER CONTRACT」確定時に
+--   1回だけ呼ぶ。アカウント作成・儀式で集めた回答・現在地チェックの
+--   診断結果・診断の個別回答を、すべて1つのトランザクションで保存する）
+-- ================================================================
+create or replace function rpc_register_player(
+  p_username text, p_pin text,
+  p_goal_tags text[], p_goal_reason text, p_commitment_cadence text, p_resolve_percent int,
+  p_current_position text, p_contract_goal text, p_started_from_zero_resolve boolean,
+  p_diagnostic_correct_count int, p_diagnostic_level text,
+  p_diagnostic_strengths text[], p_diagnostic_growth text[],
+  p_diagnostic_answers jsonb
+)
+returns table (
+  id uuid, username text, best_score int, best_rate int,
+  current_streak int, best_streak int, total_answered int, total_correct int,
+  level int, exp int, total_exp int, streak_days int,
+  today_best_score int, today_best_rate int,
+  onboarding_completed boolean, goal_reason text,
+  goal_tags text[], contract_goal text, first_area text,
+  diagnostic_level text, diagnostic_growth text[], diagnostic_strengths text[]
+)
+language plpgsql
+security definer
+as $$
+declare
+  v_user users;
+  v_today date := current_date;
+begin
+  if exists(select 1 from users u where u.username = p_username) then
+    raise exception 'このプレイヤー名はすでに使用されています';
+  end if;
+  if length(p_pin) < 4 then
+    raise exception 'PINは4桁以上で入力してください';
+  end if;
+
+  insert into users (
+    username, pin_hash, last_active_date, streak_days, today_best_date, onboarding_completed,
+    goal_tags, goal_reason, commitment_cadence, resolve_percent,
+    current_position, contract_goal, started_from_zero_resolve,
+    diagnostic_correct_count, diagnostic_level, diagnostic_strengths, diagnostic_growth, diagnostic_completed_at
+  )
+  values (
+    p_username, crypt(p_pin, gen_salt('bf')), v_today, 1, v_today, true,
+    p_goal_tags, nullif(trim(p_goal_reason), ''), p_commitment_cadence, greatest(0, least(100, p_resolve_percent)),
+    p_current_position, nullif(trim(p_contract_goal), ''), p_started_from_zero_resolve,
+    p_diagnostic_correct_count, p_diagnostic_level, p_diagnostic_strengths, p_diagnostic_growth, v_today
+  )
+  returning * into v_user;
+
+  insert into diagnostic_answers (user_id, question_id, selected_answer, is_correct, category, difficulty, diagnostic_version)
+  select v_user.id, x.question_id, x.selected_answer, x.is_correct, x.category, x.difficulty, 1
+  from jsonb_to_recordset(p_diagnostic_answers) as x(
+    question_id text, selected_answer text, is_correct boolean, category text, difficulty text
+  );
+
+  return query
+    select v_user.id, v_user.username, v_user.best_score, v_user.best_rate,
+           v_user.current_streak, v_user.best_streak, v_user.total_answered, v_user.total_correct,
+           v_user.level, v_user.exp, v_user.total_exp, v_user.streak_days,
+           v_user.today_best_score, v_user.today_best_rate,
+           v_user.onboarding_completed, v_user.goal_reason,
+           v_user.goal_tags, v_user.contract_goal, v_user.first_area,
+           v_user.diagnostic_level, v_user.diagnostic_growth, v_user.diagnostic_strengths;
 end;
 $$;
 
@@ -699,7 +806,8 @@ insert into badges (key, title, description, sort_order) values
   ('trainee_30', '訓練兵', '累計30問以上に解答した', 9),
   ('conqueror_100', '攻略者', '累計100問以上に解答した', 10),
   ('combo_20', '連撃マスター', '最大20連続正解を達成した', 11),
-  ('comeback_master', '再起の達人', '苦手だった問題をすべて復習し尽くした', 12)
+  ('comeback_master', '再起の達人', '苦手だった問題をすべて復習し尽くした', 12),
+  ('zero_to_one', 'ZERO TO ONE', '覚悟0％から、最初の一歩を記録した', 13)
 on conflict (key) do nothing;
 
 -- user_badges: 誰がどのバッジを解放済みか
@@ -807,7 +915,9 @@ begin
       ('trainee_30', v_user.total_answered >= 30),
       ('conqueror_100', v_user.total_answered >= 100),
       ('combo_20', v_user.best_streak >= 20),
-      ('comeback_master', v_ever_wrong > 0 and v_currently_wrong = 0)
+      ('comeback_master', v_ever_wrong > 0 and v_currently_wrong = 0),
+      -- 初回登録で覚悟0%を選んだ正直なプレイヤーが、3日間学習を続けたら贈られる隠し称号
+      ('zero_to_one', v_user.started_from_zero_resolve and v_user.streak_days >= 3)
     ) as conds(k, ok)
     where ok
     on conflict (user_id, badge_key) do nothing
