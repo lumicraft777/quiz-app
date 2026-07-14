@@ -38,6 +38,7 @@ const {
   generateSystemDesignQuestions,
   generateEquipmentQuestions,
   generateConstructionQuestions,
+  generateGridPolicyQuestions,
   isUnknownValue
 } = require("../question-generator.js");
 
@@ -145,6 +146,11 @@ async function main() {
   const constructionQuestions = generateConstructionQuestions();
   console.log(`  [施工・設置の知識] ${constructionQuestions.length}問を生成`);
   knowledgeQuestions = knowledgeQuestions.concat(constructionQuestions);
+
+  // 第5章 系統連系と電力制度（製品データに依存しない静的問題）
+  const gridPolicyQuestions = generateGridPolicyQuestions();
+  console.log(`  [系統連系と電力制度] ${gridPolicyQuestions.length}問を生成`);
+  knowledgeQuestions = knowledgeQuestions.concat(gridPolicyQuestions);
 
   for (const conf of SHEET_CONFIG) {
     const products = await loadProductsFromSheet(conf);
