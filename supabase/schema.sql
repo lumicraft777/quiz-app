@@ -157,7 +157,7 @@ returns table (
   level int, exp int, total_exp int, streak_days int,
   today_best_score int, today_best_rate int,
   onboarding_completed boolean, goal_reason text,
-  goal_tags text[], contract_goal text
+  goal_tags text[], contract_goal text, first_area text
 )
 language plpgsql
 security definer
@@ -210,8 +210,20 @@ begin
            v_user.level, v_user.exp, v_user.total_exp, v_user.streak_days,
            v_user.today_best_score, v_user.today_best_rate,
            v_user.onboarding_completed, v_user.goal_reason,
-           v_user.goal_tags, v_user.contract_goal;
+           v_user.goal_tags, v_user.contract_goal, v_user.first_area;
 end;
+$$;
+
+-- ================================================================
+-- RPC: 最初の攻略領域を保存する
+-- （儀式短縮に伴い、攻略領域の選択は儀式後のメイン画面ポップアップへ分離した）
+-- ================================================================
+create or replace function rpc_set_first_area(p_user_id uuid, p_first_area text)
+returns void
+language sql
+security definer
+as $$
+  update users u set first_area = p_first_area where u.id = p_user_id;
 $$;
 
 -- ================================================================

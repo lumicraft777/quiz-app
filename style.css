@@ -720,6 +720,19 @@ body.dive-active {
   letter-spacing: 0.12em;
   color: var(--color-primary);
 }
+/* STEP 4・契約画面の上部に常時表示する識別名（PLAYER：○○） */
+.onb-player-id-line {
+  margin: 0 0 14px;
+  font-family: "Courier New", monospace;
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  color: #7ef1ff;
+  text-shadow: 0 0 10px rgba(34, 227, 255, 0.4);
+}
+/* 攻略領域ポップアップ内のリード文 */
+.area-popup-lead {
+  margin: 0;
+}
 .onb-step-title {
   margin: 0 0 14px;
   font-size: 1.4rem;

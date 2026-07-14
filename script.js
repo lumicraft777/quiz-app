@@ -753,6 +753,7 @@ async function loginUser(username, pin) {
     goalReason: row.goal_reason,
     goalTags: row.goal_tags || [],
     contractGoal: row.contract_goal || "",
+    firstArea: row.first_area || "",
     wrongQuestionIds: statusRows.filter((r) => !r.correct).map((r) => r.question_id),
     correctQuestionIds: statusRows.filter((r) => r.correct).map((r) => r.question_id)
   };
@@ -1510,6 +1511,7 @@ async function initApp() {
   setupDictionary();
   setupProductDetail();
   setupOnboarding();
+  setupFirstAreaPopup();
   setupDailyMissionsClickHandler();
   setupMissionsToggle();
   setupRankingTabs();
@@ -1821,31 +1823,32 @@ function startOnboardingFlow() {
   };
 
   const s = onboardingState;
+  // STEP 1は「現在地」＋「変えたい未来」の2入力を1画面に統合しているため、
+  // 両方が選ばれて初めて次へ進めるようにする（STEP 3も同様に2入力構成）
+  const updateStep1Next = () => {
+    document.getElementById("onb-position-next").disabled = !(s.position && s.goalTags.size > 0);
+  };
+  const updateStep3Next = () => {
+    document.getElementById("onb-identity-next").disabled = !(s.identity && s.cadence);
+  };
   buildOnbSelectList("onb-position-list", ONBOARDING_POSITIONS, (v) => {
     s.position = v;
-    document.getElementById("onb-position-next").disabled = false;
+    updateStep1Next();
   });
   buildOnbChips("onb-goal-grid", ONBOARDING_GOALS, true, (selected) => {
     s.goalTags = selected;
-    document.getElementById("onb-goals-next").disabled = selected.size === 0;
+    updateStep1Next();
   });
   buildOnbSelectList("onb-identity-list", ONBOARDING_IDENTITIES, (v) => {
     s.identity = v;
-    document.getElementById("onb-identity-next").disabled = false;
-  });
-  buildOnbChips("onb-area-list", ONBOARDING_AREAS, false, (selected) => {
-    s.area = Array.from(selected)[0] || null;
-    document.getElementById("onb-area-next").disabled = !s.area;
+    updateStep3Next();
   });
   buildOnbSelectList("onb-cadence-list", ONBOARDING_CADENCE_OPTIONS, (v) => {
     s.cadence = v;
-    document.getElementById("onb-cadence-next").disabled = false;
+    updateStep3Next();
   });
   document.getElementById("onb-position-next").disabled = true;
-  document.getElementById("onb-goals-next").disabled = true;
   document.getElementById("onb-identity-next").disabled = true;
-  document.getElementById("onb-area-next").disabled = true;
-  document.getElementById("onb-cadence-next").disabled = true;
   document.getElementById("onb-reason-input").value = "";
   document.getElementById("onb-reason-warn").textContent = "";
   document.getElementById("onb-contract-input").value = "";
@@ -1881,26 +1884,20 @@ async function runOnboardingSequence() {
     { lines: ["人生の操作権を、", "あなたに返還します。"], emphasis: true }
   ]);
 
-  // ---- STEP 1：現在地を認識させる ----
+  // ---- STEP 1：現在地と目指す未来（1画面に統合） ----
   showOnboardingStep("position");
-  await waitForOnbButton("onb-position-next", () => !!s.position);
+  await waitForOnbButton("onb-position-next", () => !!s.position && s.goalTags.size > 0);
   await playOnbMessage([
-    { lines: ["現在地を確認しました。"] },
+    { lines: ["現在地と、目的を確認しました。"] },
     { lines: ["今どこにいるかは、", "重要ではありません。"] },
-    { lines: ["重要なのは、", "ここからどこへ向かうかです。"], emphasis: true }
-  ]);
-
-  // ---- STEP 2：目的ではなく「変えたい未来」を聞く ----
-  showOnboardingStep("goals");
-  await waitForOnbButton("onb-goals-next", () => s.goalTags.size > 0);
-  await playOnbMessage([
-    { lines: ["目的を確認しました。", "あなたが求めているのは、", "知識だけではありません。"] },
+    { lines: ["重要なのは、", "ここからどこへ向かうかです。"], emphasis: true },
+    { lines: ["あなたが求めているのは、", "知識だけではありません。"] },
     { lines: ["自信。", "信頼。", "結果。"], emphasis: true },
     { lines: ["そして、", "自分の人生を自分で選べる力。"] },
     { lines: ["その未来へ到達するために、", "この世界は存在します。"] }
   ]);
 
-  // ---- STEP 3：「なぜそれを望むのか」を本人の言葉で残す ----
+  // ---- STEP 2：「なぜそれを望むのか」を本人の言葉で残す ----
   showOnboardingStep("reason");
   await waitForOnbButton("onb-reason-next", () => {
     s.reason = document.getElementById("onb-reason-input").value.trim();
@@ -1912,37 +1909,18 @@ async function runOnboardingSequence() {
     return true;
   });
 
-  // ---- STEP 4：未来の自分を選択させる ----
+  // ---- STEP 3：未来のプレイヤー像と継続方法（1画面に統合） ----
   showOnboardingStep("identity");
-  await waitForOnbButton("onb-identity-next", () => !!s.identity);
+  await waitForOnbButton("onb-identity-next", () => !!s.identity && !!s.cadence);
   await playOnbMessage([
     { lines: ["未来のプレイヤーデータを登録しました。"] },
-    { lines: ["現在のあなたと、", "未来のあなたの間にあるもの。"] },
-    { lines: ["それは、", "才能ではありません。"] },
-    { lines: ["今日から積み重ねる、", "一つひとつの行動です。"], emphasis: true }
-  ]);
-
-  // ---- STEP 5：訓練する領域を選ぶ ----
-  showOnboardingStep("area");
-  await waitForOnbButton("onb-area-next", () => !!s.area);
-
-  // ---- STEP 6：識別名の確認（IDは接続時に登録済みのため確認のみ） ----
-  await playOnbMessage([
-    { lines: ["この世界では、", "肩書も過去の成績も必要ありません。"] },
-    { lines: ["必要なのは、", "これから何者になるかだけです。"] },
-    { lines: ["識別名を確認。", `PLAYER：${name}`], emphasis: true },
-    { lines: ["これ以降、あなたの行動、経験、成長は、", "すべてこの名前に記録されます。"] }
-  ]);
-
-  // ---- STEP 7：覚悟ではなく「継続方法」を選ばせる ----
-  showOnboardingStep("cadence");
-  await waitForOnbButton("onb-cadence-next", () => !!s.cadence);
-  await playOnbMessage([
     { lines: ["この約束は、", "運営者との約束ではありません。"] },
     { lines: ["未来のあなたと、", "現在のあなたが交わす約束です。"], emphasis: true }
   ]);
 
-  // ---- STEP 8：覚悟の確認（どの数値も否定しない） ----
+  // ---- STEP 4：覚悟の確認（どの数値も否定しない。識別名もここで表示） ----
+  document.getElementById("onb-resolve-player").textContent = `識別名を確認。PLAYER：${name}`;
+  document.getElementById("onb-contract-player").textContent = `PLAYER：${name}`;
   showOnboardingStep("resolve");
   for (;;) {
     await waitForOnbButton("onb-resolve-next");
@@ -1967,7 +1945,7 @@ async function runOnboardingSequence() {
     break;
   }
 
-  // ---- STEP 9：プレイヤー契約 ----
+  // ---- PLAYER CONTRACT（ステップ数に数えない最終確定画面） ----
   showOnboardingStep("contract");
   await waitForOnbButton("onb-contract-submit");
   s.contractGoal = document.getElementById("onb-contract-input").value.trim();
@@ -2010,9 +1988,7 @@ async function playOnbRegistration(name, s) {
     ["PLAYER", name],
     ["CURRENT POSITION", s.position],
     ["DESTINATION", s.identity],
-    ["REAL-WORLD OBJECTIVE", Array.from(s.goalTags).join("／")],
     ["REASON", s.reason],
-    ["FIRST AREA", s.area],
     ["DAILY COMMITMENT", s.cadence],
     ["RESOLVE", `${s.resolve}%`]
   ];
@@ -2131,6 +2107,52 @@ async function playOnboardingFinaleTransition(name, s) {
   showScreen("screen-start");
   overlay.classList.remove("show", "converging", "whiteout");
   setTimeout(() => { overlay.hidden = true; }, 350);
+}
+
+/* ================================================================
+   最初の攻略領域の選択ポップアップ
+   ----------------------------------------------------------------
+   儀式を4ステップへ短縮した際に、攻略領域の選択は儀式から分離した。
+   代わりに、攻略領域が未設定のプレイヤーがメイン画面へ到達したとき
+   ポップアップで選ばせる（「あとで決める」でそのセッション中は
+   非表示にでき、未保存なら次回ログイン時に再表示される）。
+   ================================================================ */
+
+let firstAreaPopupDismissed = false;
+
+function setupFirstAreaPopup() {
+  const panel = document.getElementById("area-select-panel");
+  let selected = null;
+  buildOnbChips("area-popup-grid", ONBOARDING_AREAS, false, (set) => {
+    selected = Array.from(set)[0] || null;
+    document.getElementById("btn-area-popup-confirm").disabled = !selected;
+  });
+  document.getElementById("btn-area-popup-confirm").addEventListener("click", async () => {
+    if (!selected || !currentUserRecord) return;
+    playConfirmSound();
+    panel.hidden = true;
+    currentUserRecord.firstArea = selected;
+    try {
+      await supabaseRpc("rpc_set_first_area", {
+        p_user_id: currentUserRecord.id,
+        p_first_area: selected
+      });
+    } catch (err) {
+      // 保存に失敗しても操作は妨げない（未保存なら次回ログイン時に再表示される）
+      console.error("攻略領域の保存に失敗しました:", err.message);
+    }
+  });
+  document.getElementById("btn-area-popup-later").addEventListener("click", () => {
+    firstAreaPopupDismissed = true;
+    panel.hidden = true;
+  });
+}
+
+function maybeShowFirstAreaPopup() {
+  if (!currentUserRecord || firstAreaPopupDismissed) return;
+  // 儀式の途中（未完了）では出さない。設定済みなら二度と出ない
+  if (!currentUserRecord.onboardingCompleted || currentUserRecord.firstArea) return;
+  document.getElementById("area-select-panel").hidden = false;
 }
 
 // 接続完了演出（粒子収束→白転→画面切り替え）。ログイン時・初回登録完了時の
@@ -3132,6 +3154,8 @@ function showScreen(id) {
   // （端末のオーバースクロール／ラバーバンドで背景の白が見えるのを防ぐ）
   document.documentElement.classList.toggle("dive-active", id === "screen-user");
   document.body.classList.toggle("dive-active", id === "screen-user");
+  // 攻略領域が未設定のプレイヤーには、メイン画面到達時に選択ポップアップを出す
+  if (id === "screen-start") maybeShowFirstAreaPopup();
 }
 
 // ---- アプリ起動 ----

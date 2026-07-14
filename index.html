@@ -9,7 +9,7 @@
 <!-- style.css / script.js を編集したら ?v= の数字を必ず増やすこと。
      増やさないと、ブラウザにキャッシュされた古いファイルが
      読み込まれ続け、コード修正がユーザーの端末に反映されないため。 -->
-<link rel="stylesheet" href="style.css?v=28">
+<link rel="stylesheet" href="style.css?v=29">
 </head>
 <body>
 
@@ -27,6 +27,20 @@
     <input type="text" id="dictionary-search" class="select-box" placeholder="ワールド辞典を検索（例：V2H）" autocomplete="off">
     <div id="dictionary-results" class="dictionary-results"></div>
     <p id="dictionary-empty-text" class="muted-text" hidden>該当する用語が見つかりませんでした。</p>
+  </div>
+</div>
+
+<!-- 最初の攻略領域の選択（儀式からは分離し、未設定のプレイヤーに
+     メイン画面到達時にポップアップで選ばせる） -->
+<div id="area-select-panel" class="dictionary-panel" hidden>
+  <div class="dictionary-panel-inner">
+    <div class="dictionary-header">
+      <h3>最初の攻略領域</h3>
+    </div>
+    <p class="onb-step-lead area-popup-lead">未来へ到達するために、最初に攻略する領域を選択してください。</p>
+    <div class="onb-goal-grid" id="area-popup-grid"></div>
+    <button type="button" class="dive-btn-primary" id="btn-area-popup-confirm" disabled>この領域から攻略を始める</button>
+    <button type="button" class="onb-back-btn" id="btn-area-popup-later">あとで決める</button>
   </div>
 </div>
 
@@ -170,27 +184,20 @@
         <p class="onb-skip-hint" id="onb-message-hint" hidden>タップで進む</p>
       </div>
 
-      <!-- STEP 1：現在地の認識 -->
+      <!-- STEP 1：現在地と目指す未来（1画面に統合して手数を減らす） -->
       <div class="onb-step" data-onb-step="position" hidden>
-        <p class="onb-step-label">STEP 1 / 9</p>
-        <h2 class="onb-step-title">現在地の確認</h2>
+        <p class="onb-step-label">STEP 1 / 4</p>
+        <h2 class="onb-step-title">現在地と目指す未来</h2>
         <p class="onb-step-lead">最初に、現在のあなたについて確認します。今の自分は、理想の自分にどれくらい近づいていますか？</p>
         <div class="onb-cadence-list" id="onb-position-list"></div>
+        <p class="onb-step-lead onb-sub-lead">あなたがこの訓練を続けた先で、現実世界の何を変えたいですか？（複数選択可）</p>
+        <div class="onb-goal-grid" id="onb-goal-grid"></div>
         <button type="button" class="dive-btn-primary onb-next-btn" id="onb-position-next" disabled>次へ</button>
       </div>
 
-      <!-- STEP 2：変えたい未来（学習内容より先に、現実の目的を聞く） -->
-      <div class="onb-step" data-onb-step="goals" hidden>
-        <p class="onb-step-label">STEP 2 / 9</p>
-        <h2 class="onb-step-title">変えたい未来</h2>
-        <p class="onb-step-lead">あなたがこの訓練を続けた先で、現実世界の何を変えたいですか？（複数選択可）</p>
-        <div class="onb-goal-grid" id="onb-goal-grid"></div>
-        <button type="button" class="dive-btn-primary onb-next-btn" id="onb-goals-next" disabled>次へ</button>
-      </div>
-
-      <!-- STEP 3：なぜその未来を望むのか（本人の言葉で残す。継続の核） -->
+      <!-- STEP 2：なぜその未来を望むのか（本人の言葉で残す。継続の核） -->
       <div class="onb-step" data-onb-step="reason" hidden>
-        <p class="onb-step-label">STEP 3 / 9</p>
+        <p class="onb-step-label">STEP 2 / 4</p>
         <h2 class="onb-step-title">この訓練を続ける理由</h2>
         <p class="onb-step-lead">では、もう一つだけ教えてください。なぜ、その未来を手に入れたいのですか？</p>
         <textarea id="onb-reason-input" class="onb-textarea" rows="3" placeholder="あなた自身の言葉で入力してください"></textarea>
@@ -199,38 +206,21 @@
         <button type="button" class="dive-btn-primary onb-next-btn" id="onb-reason-next">次へ</button>
       </div>
 
-      <!-- STEP 4：未来のプレイヤー像 -->
+      <!-- STEP 3：未来のプレイヤー像と約束（1画面に統合） -->
       <div class="onb-step" data-onb-step="identity" hidden>
-        <p class="onb-step-label">STEP 4 / 9</p>
-        <h2 class="onb-step-title">未来のプレイヤー像</h2>
+        <p class="onb-step-label">STEP 3 / 4</p>
+        <h2 class="onb-step-title">未来のプレイヤー像と約束</h2>
         <p class="onb-step-lead">この世界を攻略した先で、あなたは、どのようなプレイヤーになっていたいですか？</p>
         <div class="onb-cadence-list" id="onb-identity-list"></div>
+        <p class="onb-step-lead onb-sub-lead">未来を変えるのは、一度の大きな決意ではありません。あなたは、どのペースで攻略を続けますか？</p>
+        <div class="onb-cadence-list" id="onb-cadence-list"></div>
         <button type="button" class="dive-btn-primary onb-next-btn" id="onb-identity-next" disabled>次へ</button>
       </div>
 
-      <!-- STEP 5：最初に攻略する領域（＝学習ジャンル。成長ルートとして扱う） -->
-      <div class="onb-step" data-onb-step="area" hidden>
-        <p class="onb-step-label">STEP 5 / 9</p>
-        <h2 class="onb-step-title">最初の攻略領域</h2>
-        <p class="onb-step-lead">未来へ到達するために、最初に攻略する領域を選択してください。</p>
-        <div class="onb-goal-grid" id="onb-area-list"></div>
-        <button type="button" class="dive-btn-primary onb-next-btn" id="onb-area-next" disabled>次へ</button>
-      </div>
-
-      <!-- STEP 6（識別名の確認）はメッセージ演出で行う（プレイヤーIDは接続時に登録済みのため） -->
-
-      <!-- STEP 7：継続方法（覚悟だけでなく、現実的なペースを自分で選ぶ） -->
-      <div class="onb-step" data-onb-step="cadence" hidden>
-        <p class="onb-step-label">STEP 7 / 9</p>
-        <h2 class="onb-step-title">継続方法</h2>
-        <p class="onb-step-lead">未来を変えるのは、一度の大きな決意ではありません。小さな行動を、何度も選び続けることです。あなたは、どのペースで攻略を続けますか？</p>
-        <div class="onb-cadence-list" id="onb-cadence-list"></div>
-        <button type="button" class="dive-btn-primary onb-next-btn" id="onb-cadence-next" disabled>次へ</button>
-      </div>
-
-      <!-- STEP 8：覚悟の確認（どの数値でも否定しない） -->
+      <!-- STEP 4：覚悟の確認（どの数値でも否定しない。識別名もここで確認） -->
       <div class="onb-step" data-onb-step="resolve" hidden>
-        <p class="onb-step-label">STEP 8 / 9</p>
+        <p class="onb-player-id-line" id="onb-resolve-player"></p>
+        <p class="onb-step-label">STEP 4 / 4</p>
         <h2 class="onb-step-title">覚悟の確認</h2>
         <p class="onb-step-lead">今回のダイブに、どれほどの覚悟を持っていますか？</p>
         <input type="range" id="onb-resolve-slider" class="onb-slider" min="0" max="100" step="5" value="50">
@@ -249,9 +239,10 @@
         <button type="button" class="onb-back-btn" id="onb-resolve-back">考え直す</button>
       </div>
 
-      <!-- STEP 9：PLAYER CONTRACT -->
+      <!-- PLAYER CONTRACT（最終確定。ステップ数には数えない締めの契約画面） -->
       <div class="onb-step" data-onb-step="contract" hidden>
-        <p class="onb-step-label">STEP 9 / 9</p>
+        <p class="onb-player-id-line" id="onb-contract-player"></p>
+        <p class="onb-step-label">PLAYER CONTRACT</p>
         <h2 class="onb-step-title">PLAYER CONTRACT</h2>
         <div class="onb-contract-box">
           <p>私は、自分の人生を誰かに委ねません。</p>
@@ -591,6 +582,6 @@
 
 </div>
 
-<script src="script.js?v=31"></script>
+<script src="script.js?v=32"></script>
 </body>
 </html>
