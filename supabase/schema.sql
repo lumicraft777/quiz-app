@@ -726,23 +726,32 @@ $$;
 -- ================================================================
 -- RPC 5: ランキング（全ユーザー横断。PINやIDなど機微な情報は含めない）
 -- 並び順は既存どおり正答率→正答数。level/total_expは表示用の追加情報。
+-- 表示は「上位5名＋（圏外なら）自分の行」。rank列で実際の順位を返し、
+-- is_self=trueの行がリクエストしたプレイヤー自身。
 -- ================================================================
 drop function if exists rpc_get_ranking();
-create or replace function rpc_get_ranking()
+drop function if exists rpc_get_ranking(uuid);
+create or replace function rpc_get_ranking(p_user_id uuid default null)
 returns table (
-  username text, best_score int, best_rate int,
+  rank int, username text, best_score int, best_rate int,
   total_answered int, total_correct int, current_streak int, best_streak int,
-  level int, total_exp int, equipped_badge_title text
+  level int, total_exp int, equipped_badge_title text, is_self boolean
 )
 language sql
 security definer
 as $$
-  select u.username, u.best_score, u.best_rate, u.total_answered, u.total_correct, u.current_streak, u.best_streak,
-         u.level, u.total_exp, b.title
-  from users u
-  left join badges b on b.key = u.equipped_badge_key
-  order by u.best_rate desc, u.best_score desc
-  limit 100;
+  with ranked as (
+    select row_number() over (order by u.best_rate desc, u.best_score desc)::int as rank,
+           u.id, u.username, u.best_score, u.best_rate, u.total_answered, u.total_correct,
+           u.current_streak, u.best_streak, u.level, u.total_exp, b.title
+    from users u
+    left join badges b on b.key = u.equipped_badge_key
+  )
+  select r.rank, r.username, r.best_score, r.best_rate, r.total_answered, r.total_correct,
+         r.current_streak, r.best_streak, r.level, r.total_exp, r.title, (r.id = p_user_id)
+  from ranked r
+  where r.rank <= 5 or r.id = p_user_id
+  order by r.rank;
 $$;
 
 -- ================================================================
@@ -1067,110 +1076,159 @@ $$;
 -- ================================================================
 -- 「毎日触れているか」を可視化するための継続日数ランキング。
 -- streak_daysが同じ場合は直近ログインの新しい順にする
+-- 各ランキング共通仕様：rank列（実際の順位）を付けて「上位5名＋（圏外なら）自分」
+-- だけを返す。is_self=trueがリクエストしたプレイヤー自身の行。
+-- 対象条件（streak_days > 0 など）を満たしていない場合、自分の行は返らない。
 drop function if exists rpc_get_streak_ranking();
-create or replace function rpc_get_streak_ranking()
-returns table (username text, streak_days int, last_active_date date, level int, total_exp int, equipped_badge_title text)
+drop function if exists rpc_get_streak_ranking(uuid);
+create or replace function rpc_get_streak_ranking(p_user_id uuid default null)
+returns table (rank int, username text, streak_days int, last_active_date date, level int, total_exp int, equipped_badge_title text, is_self boolean)
 language sql
 security definer
 as $$
-  select u.username, u.streak_days, u.last_active_date, u.level, u.total_exp, b.title
-  from users u
-  left join badges b on b.key = u.equipped_badge_key
-  where u.streak_days > 0
-  order by u.streak_days desc, u.last_active_date desc nulls last
-  limit 100;
+  with ranked as (
+    select row_number() over (order by u.streak_days desc, u.last_active_date desc nulls last)::int as rank,
+           u.id, u.username, u.streak_days, u.last_active_date, u.level, u.total_exp, b.title
+    from users u
+    left join badges b on b.key = u.equipped_badge_key
+    where u.streak_days > 0
+  )
+  select r.rank, r.username, r.streak_days, r.last_active_date, r.level, r.total_exp, r.title, (r.id = p_user_id)
+  from ranked r
+  where r.rank <= 5 or r.id = p_user_id
+  order by r.rank;
 $$;
 
 drop function if exists rpc_get_weekly_ranking();
-create or replace function rpc_get_weekly_ranking()
-returns table (username text, weekly_correct int, weekly_answered int, level int, total_exp int, equipped_badge_title text)
+drop function if exists rpc_get_weekly_ranking(uuid);
+create or replace function rpc_get_weekly_ranking(p_user_id uuid default null)
+returns table (rank int, username text, weekly_correct int, weekly_answered int, level int, total_exp int, equipped_badge_title text, is_self boolean)
 language sql
 security definer
 as $$
-  select u.username,
-         count(*) filter (where ah.correct)::int as weekly_correct,
-         count(*)::int as weekly_answered,
-         u.level, u.total_exp, b.title
-  from answer_history ah
-  join users u on u.id = ah.user_id
-  left join badges b on b.key = u.equipped_badge_key
-  where ah.answered_at >= now() - interval '7 days'
-  group by u.id, u.username, u.level, u.total_exp, b.title
-  order by weekly_correct desc, weekly_answered desc
-  limit 100;
+  with agg as (
+    select u.id, u.username,
+           count(*) filter (where ah.correct)::int as weekly_correct,
+           count(*)::int as weekly_answered,
+           u.level, u.total_exp, b.title
+    from answer_history ah
+    join users u on u.id = ah.user_id
+    left join badges b on b.key = u.equipped_badge_key
+    where ah.answered_at >= now() - interval '7 days'
+    group by u.id, u.username, u.level, u.total_exp, b.title
+  ), ranked as (
+    select row_number() over (order by a.weekly_correct desc, a.weekly_answered desc)::int as rank, a.*
+    from agg a
+  )
+  select r.rank, r.username, r.weekly_correct, r.weekly_answered, r.level, r.total_exp, r.title, (r.id = p_user_id)
+  from ranked r
+  where r.rank <= 5 or r.id = p_user_id
+  order by r.rank;
 $$;
 
 drop function if exists rpc_get_monthly_ranking();
-create or replace function rpc_get_monthly_ranking()
-returns table (username text, monthly_correct int, monthly_answered int, level int, total_exp int, equipped_badge_title text)
+drop function if exists rpc_get_monthly_ranking(uuid);
+create or replace function rpc_get_monthly_ranking(p_user_id uuid default null)
+returns table (rank int, username text, monthly_correct int, monthly_answered int, level int, total_exp int, equipped_badge_title text, is_self boolean)
 language sql
 security definer
 as $$
-  select u.username,
-         count(*) filter (where ah.correct)::int as monthly_correct,
-         count(*)::int as monthly_answered,
-         u.level, u.total_exp, b.title
-  from answer_history ah
-  join users u on u.id = ah.user_id
-  left join badges b on b.key = u.equipped_badge_key
-  where ah.answered_at >= now() - interval '30 days'
-  group by u.id, u.username, u.level, u.total_exp, b.title
-  order by monthly_correct desc, monthly_answered desc
-  limit 100;
+  with agg as (
+    select u.id, u.username,
+           count(*) filter (where ah.correct)::int as monthly_correct,
+           count(*)::int as monthly_answered,
+           u.level, u.total_exp, b.title
+    from answer_history ah
+    join users u on u.id = ah.user_id
+    left join badges b on b.key = u.equipped_badge_key
+    where ah.answered_at >= now() - interval '30 days'
+    group by u.id, u.username, u.level, u.total_exp, b.title
+  ), ranked as (
+    select row_number() over (order by a.monthly_correct desc, a.monthly_answered desc)::int as rank, a.*
+    from agg a
+  )
+  select r.rank, r.username, r.monthly_correct, r.monthly_answered, r.level, r.total_exp, r.title, (r.id = p_user_id)
+  from ranked r
+  where r.rank <= 5 or r.id = p_user_id
+  order by r.rank;
 $$;
 
 drop function if exists rpc_get_combo_ranking();
-create or replace function rpc_get_combo_ranking()
-returns table (username text, best_streak int, level int, total_exp int, equipped_badge_title text)
+drop function if exists rpc_get_combo_ranking(uuid);
+create or replace function rpc_get_combo_ranking(p_user_id uuid default null)
+returns table (rank int, username text, best_streak int, level int, total_exp int, equipped_badge_title text, is_self boolean)
 language sql
 security definer
 as $$
-  select u.username, u.best_streak, u.level, u.total_exp, b.title
-  from users u
-  left join badges b on b.key = u.equipped_badge_key
-  where u.best_streak > 0
-  order by u.best_streak desc
-  limit 100;
+  with ranked as (
+    select row_number() over (order by u.best_streak desc)::int as rank,
+           u.id, u.username, u.best_streak, u.level, u.total_exp, b.title
+    from users u
+    left join badges b on b.key = u.equipped_badge_key
+    where u.best_streak > 0
+  )
+  select r.rank, r.username, r.best_streak, r.level, r.total_exp, r.title, (r.id = p_user_id)
+  from ranked r
+  where r.rank <= 5 or r.id = p_user_id
+  order by r.rank;
 $$;
 
 drop function if exists rpc_get_suppression_ranking();
-create or replace function rpc_get_suppression_ranking()
-returns table (username text, best_rate int, level int, total_exp int, equipped_badge_title text)
+drop function if exists rpc_get_suppression_ranking(uuid);
+create or replace function rpc_get_suppression_ranking(p_user_id uuid default null)
+returns table (rank int, username text, best_rate int, level int, total_exp int, equipped_badge_title text, is_self boolean)
 language sql
 security definer
 as $$
-  select u.username, u.best_rate, u.level, u.total_exp, b.title
-  from users u
-  left join badges b on b.key = u.equipped_badge_key
-  where u.total_answered > 0
-  order by u.best_rate desc, u.username asc
-  limit 100;
+  with ranked as (
+    select row_number() over (order by u.best_rate desc, u.username asc)::int as rank,
+           u.id, u.username, u.best_rate, u.level, u.total_exp, b.title
+    from users u
+    left join badges b on b.key = u.equipped_badge_key
+    where u.total_answered > 0
+  )
+  select r.rank, r.username, r.best_rate, r.level, r.total_exp, r.title, (r.id = p_user_id)
+  from ranked r
+  where r.rank <= 5 or r.id = p_user_id
+  order by r.rank;
 $$;
 
 drop function if exists rpc_get_mission_count_ranking();
-create or replace function rpc_get_mission_count_ranking()
-returns table (username text, total_answered int, level int, total_exp int, equipped_badge_title text)
+drop function if exists rpc_get_mission_count_ranking(uuid);
+create or replace function rpc_get_mission_count_ranking(p_user_id uuid default null)
+returns table (rank int, username text, total_answered int, level int, total_exp int, equipped_badge_title text, is_self boolean)
 language sql
 security definer
 as $$
-  select u.username, u.total_answered, u.level, u.total_exp, b.title
-  from users u
-  left join badges b on b.key = u.equipped_badge_key
-  where u.total_answered > 0
-  order by u.total_answered desc
-  limit 100;
+  with ranked as (
+    select row_number() over (order by u.total_answered desc)::int as rank,
+           u.id, u.username, u.total_answered, u.level, u.total_exp, b.title
+    from users u
+    left join badges b on b.key = u.equipped_badge_key
+    where u.total_answered > 0
+  )
+  select r.rank, r.username, r.total_answered, r.level, r.total_exp, r.title, (r.id = p_user_id)
+  from ranked r
+  where r.rank <= 5 or r.id = p_user_id
+  order by r.rank;
 $$;
 
 drop function if exists rpc_get_review_ranking();
-create or replace function rpc_get_review_ranking()
-returns table (username text, review_correct_count int, level int, total_exp int, equipped_badge_title text)
+drop function if exists rpc_get_review_ranking(uuid);
+create or replace function rpc_get_review_ranking(p_user_id uuid default null)
+returns table (rank int, username text, review_correct_count int, level int, total_exp int, equipped_badge_title text, is_self boolean)
 language sql
 security definer
 as $$
-  select u.username, u.review_correct_count, u.level, u.total_exp, b.title
-  from users u
-  left join badges b on b.key = u.equipped_badge_key
-  where u.review_correct_count > 0
-  order by u.review_correct_count desc
-  limit 100;
+  with ranked as (
+    select row_number() over (order by u.review_correct_count desc)::int as rank,
+           u.id, u.username, u.review_correct_count, u.level, u.total_exp, b.title
+    from users u
+    left join badges b on b.key = u.equipped_badge_key
+    where u.review_correct_count > 0
+  )
+  select r.rank, r.username, r.review_correct_count, r.level, r.total_exp, r.title, (r.id = p_user_id)
+  from ranked r
+  where r.rank <= 5 or r.id = p_user_id
+  order by r.rank;
 $$;

@@ -1038,15 +1038,20 @@ async function fetchRanking() {
 }
 
 // 攻略者ボードの種類ごとに異なるRPCを呼ぶ（総合以外は既存のソートロジックには一切触れない）
+// 各ランキングは「上位5名＋（圏外なら）自分の行」だけがサーバーから返る。
+// 自分の順位を出すため、ログイン中のユーザーIDを毎回渡す
+function rankingParams() {
+  return { p_user_id: currentUserRecord ? currentUserRecord.id : null };
+}
 const RANKING_FETCHERS = {
-  overall: () => supabaseRpc("rpc_get_ranking", {}),
-  streak: () => supabaseRpc("rpc_get_streak_ranking", {}),
-  weekly: () => supabaseRpc("rpc_get_weekly_ranking", {}),
-  monthly: () => supabaseRpc("rpc_get_monthly_ranking", {}),
-  combo: () => supabaseRpc("rpc_get_combo_ranking", {}),
-  suppression: () => supabaseRpc("rpc_get_suppression_ranking", {}),
-  missions: () => supabaseRpc("rpc_get_mission_count_ranking", {}),
-  review: () => supabaseRpc("rpc_get_review_ranking", {})
+  overall: () => supabaseRpc("rpc_get_ranking", rankingParams()),
+  streak: () => supabaseRpc("rpc_get_streak_ranking", rankingParams()),
+  weekly: () => supabaseRpc("rpc_get_weekly_ranking", rankingParams()),
+  monthly: () => supabaseRpc("rpc_get_monthly_ranking", rankingParams()),
+  combo: () => supabaseRpc("rpc_get_combo_ranking", rankingParams()),
+  suppression: () => supabaseRpc("rpc_get_suppression_ranking", rankingParams()),
+  missions: () => supabaseRpc("rpc_get_mission_count_ranking", rankingParams()),
+  review: () => supabaseRpc("rpc_get_review_ranking", rankingParams())
 };
 
 // ---- 称号（バッジ） ----
@@ -1721,6 +1726,7 @@ async function initApp() {
   setupPlayerLog();
   setupDailyMissionsClickHandler();
   setupMissionsToggle();
+  setupAreaCard();
   setupRankingTabs();
   showScreen("screen-user");
   loadGlossary(); // 用語集はクイズ体験をブロックしないよう並行して読み込む
@@ -2823,6 +2829,7 @@ function setupStartScreen() {
       document.querySelectorAll("#category-chip-container .area-chip").forEach((b) => b.classList.remove("selected"));
       chip.classList.add("selected");
       state.categories = new Set([category]);
+      updateAreaSummary();
     }
     document.querySelector('[data-level="初級"]')?.click();
     document.querySelector('[data-count="5"]')?.click();
@@ -3415,16 +3422,32 @@ async function renderRankingScreen() {
     }
 
     rows.forEach((row, idx) => {
+      // 上位5名の下に圏外の自分の行が続く場合、順位が飛ぶことを「⋯」で示す
+      const prevRank = idx > 0 ? rows[idx - 1].rank : 0;
+      if (row.rank > prevRank + 1) {
+        const gap = document.createElement("div");
+        gap.className = "ranking-gap";
+        gap.textContent = "⋯";
+        listEl.appendChild(gap);
+      }
+
       const item = document.createElement("div");
-      item.className = "ranking-row " + buildRankingRowRankClass(idx + 1);
+      item.className = "ranking-row " + buildRankingRowRankClass(row.rank);
+      if (row.is_self) item.classList.add("ranking-row-self");
 
       const rank = document.createElement("span");
       rank.className = "ranking-rank";
-      rank.textContent = `${idx + 1}`;
+      rank.textContent = `${row.rank}`;
 
       const name = document.createElement("span");
       name.className = "ranking-name";
       name.textContent = row.username;
+      if (row.is_self) {
+        const selfTag = document.createElement("span");
+        selfTag.className = "ranking-self-tag";
+        selfTag.textContent = "YOU";
+        name.appendChild(selfTag);
+      }
       if (row.equipped_badge_title) {
         const titleTag = document.createElement("span");
         titleTag.className = "ranking-title-tag";
@@ -3467,6 +3490,9 @@ async function renderRankingScreen() {
 function renderAreaChips() {
   const container = document.getElementById("category-chip-container");
   container.innerHTML = "";
+  // 前回の選択は保持する（毎回選び直す手間を省く）。再構築後に、
+  // 現在のモードでも存在するチップだけ選択状態を復元する
+  const previousSelection = state.categories instanceof Set ? state.categories : new Set();
   state.categories = new Set();
 
   let pool;
@@ -3511,6 +3537,55 @@ function renderAreaChips() {
     productCats.forEach((cat) => productGrid.appendChild(makeAreaChip(cat, cat)));
     container.appendChild(productGrid);
   }
+
+  // 前回選択していたエリアを復元する（モード変更で消えたチップの分は選択から外れる）
+  previousSelection.forEach((v) => {
+    if (v === "全エリア") return;
+    const btn = container.querySelector(`.area-chip[data-value="${CSS.escape(v)}"]`);
+    if (btn) {
+      state.categories.add(v);
+      btn.classList.add("selected");
+    }
+  });
+  if (state.categories.size > 0) allChip.classList.remove("selected");
+  updateAreaSummary();
+}
+
+// エリアカードのヘッダーに、現在の選択内容を1行で要約表示する
+function updateAreaSummary() {
+  const summary = document.getElementById("area-selected-summary");
+  if (!summary) return;
+  if (!state.categories || state.categories.size === 0) {
+    summary.textContent = "全エリア";
+  } else if (state.categories.size <= 2) {
+    summary.textContent = Array.from(state.categories)
+      .map((v) => categoryDisplayLabel(v)).join("、");
+  } else {
+    summary.textContent = `${state.categories.size}エリア選択中`;
+  }
+}
+
+// エリアカードの折りたたみトグルと、選択リセットボタン
+function setupAreaCard() {
+  const card = document.getElementById("area-card");
+  const toggleBtn = document.getElementById("btn-area-toggle");
+  const resetBtn = document.getElementById("btn-area-reset");
+  if (!card || !toggleBtn || !resetBtn) return;
+
+  toggleBtn.addEventListener("click", () => {
+    playSelectSound();
+    card.classList.toggle("expanded");
+  });
+
+  resetBtn.addEventListener("click", () => {
+    playSelectSound();
+    state.categories = new Set();
+    const container = document.getElementById("category-chip-container");
+    container.querySelectorAll(".area-chip").forEach((b) => b.classList.remove("selected"));
+    const allBtn = container.querySelector(".area-chip-all");
+    if (allBtn) allBtn.classList.add("selected");
+    updateAreaSummary();
+  });
 }
 
 // エリアチップ1個を生成する（クリックでトグル選択。「全エリア」は他の選択を全解除する特別扱い）
@@ -3533,6 +3608,7 @@ function toggleAreaChip(value, btnEl) {
     state.categories.clear();
     container.querySelectorAll(".area-chip").forEach((b) => b.classList.remove("selected"));
     allBtn.classList.add("selected");
+    updateAreaSummary();
     return;
   }
 
@@ -3547,6 +3623,7 @@ function toggleAreaChip(value, btnEl) {
   if (state.categories.size === 0) {
     allBtn.classList.add("selected");
   }
+  updateAreaSummary();
 }
 
 // PLAYER LOGへの記録・セッション表示用に、選択中エリアを1つの文字列にまとめる
@@ -4177,25 +4254,19 @@ function startReviewSession() {
 
 // ---- 最初からやり直す（ユーザーはログインしたまま） ----
 function resetToStart() {
-  state.mode = null;
-  state.categories = new Set();
-  state.level = "全レベル";
-  state.countOption = null;
+  // 任務モード・エリア・レベル・任務規模の選択はあえてリセットしない。
+  // 「同じ条件でもう一度」が最頻の使い方なので、毎回選び直す手間を省く
+  // （エリアはヘッダーのリセットボタンでいつでも全解除できる）
   state.sessionQuestions = [];
   state.currentIndex = 0;
   state.userAnswers = [];
   state.isReviewSession = false;
 
-  const chipContainer = document.getElementById("category-chip-container");
-  if (chipContainer) chipContainer.innerHTML = "";
+  // 要再挑戦リスト・正解問題の問題数が任務結果で変わるため、
+  // チップを再構築する（選択状態はrenderAreaChips内で復元される）
+  if (state.mode) renderAreaChips();
 
-  document.querySelectorAll("#mode-select .option-btn, #count-select .option-btn, #level-select .option-btn").forEach((b) =>
-    b.classList.remove("selected")
-  );
-  // レベルは「全レベル」がデフォルト選択状態に戻る
-  document.querySelector('#level-select .option-btn[data-level="全レベル"]').classList.add("selected");
-
-  document.getElementById("btn-start").disabled = true;
+  validateStartButton();
   document.getElementById("start-warning").textContent = "";
   renderBestRecordOnStart();
   refreshAllExpGauges();
@@ -4216,10 +4287,12 @@ function showScreen(id) {
   if (diveBg) diveBg.hidden = id !== "screen-user";
   // デジタルトンネル背景（#cyber-bg）は全画面共通。ログイン画面では
   // 半透明の#dive-bgが上に重なり、トンネルがうっすら透けて見える
-  // ダイブ画面表示中は上下左右のスワイプでページ自体が動かないようにする
-  // （端末のオーバースクロール／ラバーバンドで背景の白が見えるのを防ぐ）
-  document.documentElement.classList.toggle("dive-active", id === "screen-user");
-  document.body.classList.toggle("dive-active", id === "screen-user");
+  // ダイブ画面・初回登録儀式の表示中は、スワイプや入力欄フォーカスで
+  // ページ自体が上下に動かないよう画面全体を固定する（儀式の内容が
+  // 収まらない端末では、儀式画面の内側だけ縦スクロールできる）
+  const lockPage = (id === "screen-user" || id === "screen-onboarding");
+  document.documentElement.classList.toggle("dive-active", lockPage);
+  document.body.classList.toggle("dive-active", lockPage);
 
   // ログイン画面・初回登録儀式の間は没入感を優先し、ワールド辞典アイコンを隠す
   const dictToggle = document.getElementById("btn-dictionary-toggle");

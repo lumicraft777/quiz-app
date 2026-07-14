@@ -79,6 +79,19 @@ body.dive-active {
   overscroll-behavior: none;
   background: var(--color-bg);
 }
+/* 初回登録儀式もページ固定の対象（showScreenでdive-activeが付く）。
+   ページ自体は一切動かないが、ステップの内容が縦に収まらない端末では
+   #appの内側だけスクロールできるようにして、操作不能を防ぐ */
+html.dive-active,
+body.dive-active {
+  height: 100%;
+}
+body.dive-active #app {
+  height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
 
 #app {
   position: relative;
@@ -155,6 +168,22 @@ body.dive-active {
   margin: 0 0 6px;
   color: var(--color-text);
   text-shadow: 0 0 16px rgba(34, 227, 255, 0.4);
+}
+/* アプリの正式タイトル「S.A.O.」。略称を大きくネオン発光させ、
+   直下にフルネームの英文を小さく添える */
+.app-title-main {
+  font-size: 2.2rem !important;
+  letter-spacing: 0.14em;
+  margin-bottom: 0 !important;
+  text-shadow: 0 0 22px rgba(34, 227, 255, 0.65), 0 0 44px rgba(34, 227, 255, 0.3) !important;
+}
+.app-title-full {
+  margin: 2px 0 8px;
+  font-size: 0.72rem;
+  letter-spacing: 0.42em;
+  color: var(--color-primary);
+  opacity: 0.8;
+  text-transform: uppercase;
 }
 .app-sub {
   margin: 0;
@@ -721,7 +750,8 @@ select:-webkit-autofill:focus {
     radial-gradient(ellipse at 50% 15%, rgba(34, 227, 255, 0.14), transparent 55%),
     linear-gradient(180deg, rgba(2, 3, 10, 0.72) 0%, rgba(6, 10, 28, 0.6) 45%, rgba(2, 3, 10, 0.72) 100%);
   color: #e7edff;
-  padding: 32px 20px 48px;
+  /* ページ固定化に合わせて余白を詰め、各ステップが1画面に収まりやすくする */
+  padding: 18px 16px 28px;
 }
 .onboarding-inner {
   max-width: 420px;
@@ -824,6 +854,67 @@ select:-webkit-autofill:focus {
 }
 
 /* エリア選択（複数選択可）：ネオンチップボタングリッド */
+/* エリアカードのヘッダー行：タイトル（タップで折りたたみ）＋右端にリセットボタン */
+.area-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.area-summary-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+  border: none;
+  background: none;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+}
+.area-card-title {
+  margin: 0 !important;
+}
+.area-selected-summary {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.72rem;
+  color: var(--color-primary);
+  opacity: 0.8;
+  text-align: right;
+}
+.area-chevron {
+  flex: none;
+}
+.area-card.expanded .area-chevron {
+  transform: rotate(180deg);
+}
+.area-card .area-chip-container {
+  margin-top: 12px;
+}
+.area-card:not(.expanded) .area-chip-container {
+  display: none;
+}
+.area-reset-btn {
+  flex: none;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 49, 216, 0.5);
+  background: rgba(255, 49, 216, 0.08);
+  color: var(--color-accent);
+  font-size: 0.72rem;
+  font-weight: bold;
+  cursor: pointer;
+  transition: background 0.15s, box-shadow 0.15s;
+}
+.area-reset-btn:hover {
+  background: rgba(255, 49, 216, 0.18);
+  box-shadow: 0 0 10px rgba(255, 49, 216, 0.35);
+}
+
 .area-chip-container {
   display: flex;
   flex-direction: column;
@@ -1563,6 +1654,31 @@ select:-webkit-autofill:focus {
   font-weight: normal;
   vertical-align: middle;
   white-space: nowrap;
+}
+/* 自分の行の強調（上位5名の中でも、圏外で下に付く場合でも共通） */
+.ranking-row-self {
+  border-color: var(--color-accent) !important;
+  box-shadow: 0 0 14px rgba(255, 49, 216, 0.3);
+}
+.ranking-self-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--color-accent);
+  color: #fff;
+  font-size: 0.62rem;
+  font-weight: bold;
+  letter-spacing: 0.08em;
+  vertical-align: middle;
+}
+/* 5位と圏外の自分の行の間に挟む「順位が飛んでいる」ことを示す省略記号 */
+.ranking-gap {
+  text-align: center;
+  color: var(--color-muted);
+  font-size: 1rem;
+  letter-spacing: 0.3em;
+  padding: 2px 0;
 }
 .ranking-stats {
   flex: 1 1 100%;

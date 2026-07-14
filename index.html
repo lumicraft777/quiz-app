@@ -5,11 +5,11 @@
 <!-- maximum-scale=1で、入力欄フォーカス時の自動ズーム（MISSION START後に
      画面が拡大されたままになる原因）を防ぐ。UIの大枠を固定して没入感を保つ -->
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-<title>蓄電池メーカー比較クイズ｜営業判断力トレーニング</title>
+<title>S.A.O. - Sales Advisor Online｜営業判断力トレーニング</title>
 <!-- style.css / script.js を編集したら ?v= の数字を必ず増やすこと。
      増やさないと、ブラウザにキャッシュされた古いファイルが
      読み込まれ続け、コード修正がユーザーの端末に反映されないため。 -->
-<link rel="stylesheet" href="style.css?v=35">
+<link rel="stylesheet" href="style.css?v=36">
 </head>
 <body>
 
@@ -355,7 +355,8 @@
   ============================================================= -->
   <section id="screen-start" class="screen">
     <header class="app-header">
-      <h1>蓄電池メーカー比較クイズ</h1>
+      <h1 class="app-title-main">S.A.O.</h1>
+      <p class="app-title-full">SALES ADVISOR ONLINE</p>
       <p class="app-sub">仮想訓練空間で知識と判断力を鍛え、任務を攻略せよ。</p>
       <p id="best-record-text" class="best-record-text"></p>
     </header>
@@ -409,8 +410,17 @@
       </div>
     </div>
 
-    <div class="card">
-      <h2 class="card-title">2. エリアを選ぶ</h2>
+    <!-- エリア選択：タイトルタップで折りたたみ（緊急クエストと同じ操作感）。
+         選択状態は任務後にホームへ戻っても保持され、リセットボタンで全解除する -->
+    <div class="card area-card expanded" id="area-card">
+      <div class="area-card-header">
+        <button type="button" id="btn-area-toggle" class="area-summary-toggle">
+          <span class="card-title area-card-title">2. エリアを選ぶ</span>
+          <span id="area-selected-summary" class="area-selected-summary">全エリア</span>
+          <span class="mission-summary-chevron area-chevron">▼</span>
+        </button>
+        <button type="button" id="btn-area-reset" class="area-reset-btn">リセット</button>
+      </div>
       <div id="category-chip-container" class="area-chip-container"></div>
     </div>
 
@@ -796,6 +806,6 @@
 
 </div>
 
-<script src="script.js?v=51"></script>
+<script src="script.js?v=52"></script>
 </body>
 </html>
