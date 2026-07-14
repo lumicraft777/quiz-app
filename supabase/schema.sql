@@ -91,6 +91,39 @@ create index if not exists answer_history_lookup
   on answer_history (user_id, question_id, answered_at desc);
 
 -- ================================================================
+-- quiz_sessions: PLAYER LOG（個人学習記録）機能のためのセッション単位の記録。
+-- 1回の任務プレイ（開始〜結果画面 or 途中退出）を1行として保存する。
+-- 集計の高速化用ではなく、日別サマリー・セッション履歴・継続学習日数の
+-- 計算に使う一次データ（answer_historyと並ぶソースオブトゥルース）。
+-- ================================================================
+create table if not exists quiz_sessions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references users(id) on delete cascade,
+  started_at timestamptz not null default now(),
+  ended_at timestamptz,
+  mode text,
+  category text,
+  difficulty text,
+  selected_count text,
+  answered_count int not null default 0,
+  correct_count int not null default 0,
+  incorrect_count int not null default 0,
+  earned_exp int not null default 0,
+  level_before int,
+  level_after int,
+  completed boolean not null default false,
+  exited_early boolean not null default false
+);
+create index if not exists quiz_sessions_user_date
+  on quiz_sessions (user_id, started_at desc);
+
+-- answer_historyの各行がどのセッション内の回答かを紐づける
+-- （将来の「問題ごとの回答履歴」機能のための下地。nullを許容し、
+--   セッション作成に失敗しても回答記録そのものは止めない）
+alter table answer_history add column if not exists session_id uuid references quiz_sessions(id) on delete set null;
+create index if not exists answer_history_session on answer_history (session_id);
+
+-- ================================================================
 -- glossary: 問題文中に出てくる専門用語の辞書（用語集機能で使用）
 -- 直接編集する場合はSQL Editorから、または scripts/sync-glossary.js
 -- （用語集シートを追加した場合）で更新する
@@ -125,6 +158,8 @@ alter table users enable row level security;
 alter table answer_history enable row level security;
 alter table glossary enable row level security;
 alter table products enable row level security;
+alter table quiz_sessions enable row level security;
+-- quiz_sessionsにもポリシーを作らない（＝直接アクセス禁止、RPC経由のみ）
 
 -- questions / glossary / products は機密性が無いため、読み取りのみ全体公開する
 drop policy if exists "questions are readable by anyone" on questions;
@@ -259,7 +294,8 @@ $$;
 -- ================================================================
 create or replace function rpc_record_answer(
   p_user_id uuid, p_question_id text, p_correct boolean,
-  p_mode text default null, p_category text default null, p_is_review boolean default false
+  p_mode text default null, p_category text default null, p_is_review boolean default false,
+  p_session_id uuid default null
 )
 returns table (
   current_streak int, best_streak int, total_answered int,
@@ -271,8 +307,8 @@ as $$
 declare
   v_new_streak int;
 begin
-  insert into answer_history (user_id, question_id, correct, mode, category, is_review)
-  values (p_user_id, p_question_id, p_correct, p_mode, p_category, p_is_review);
+  insert into answer_history (user_id, question_id, correct, mode, category, is_review, session_id)
+  values (p_user_id, p_question_id, p_correct, p_mode, p_category, p_is_review, p_session_id);
 
   select case when p_correct then u.current_streak + 1 else 0 end
   into v_new_streak
@@ -332,6 +368,225 @@ begin
   where u.id = p_user_id;
 
   return query select v_today_score, v_today_rate;
+end;
+$$;
+
+-- ================================================================
+-- PLAYER LOG（個人学習記録）関連RPC
+-- ----------------------------------------------------------------
+-- クイズ開始時にセッション行を作り（rpc_start_player_log_session）、
+-- 各回答はrpc_record_answerのp_session_idで紐づけ、結果画面表示 or
+-- 途中退出のタイミングでセッション行を確定させる
+-- （rpc_finish_player_log_session）。月間カレンダー・日別詳細・
+-- セッション履歴・継続学習日数は、すべてquiz_sessions／
+-- answer_historyを元データとしてその場で集計する（別途の同期が
+-- 必要な非正規化テーブルは持たない）。
+-- ================================================================
+create or replace function rpc_start_player_log_session(
+  p_session_id uuid, p_user_id uuid, p_mode text,
+  p_category text, p_difficulty text, p_selected_count text
+)
+returns void
+language sql
+security definer
+as $$
+  insert into quiz_sessions (id, user_id, mode, category, difficulty, selected_count)
+  values (p_session_id, p_user_id, p_mode, p_category, p_difficulty, p_selected_count);
+$$;
+
+create or replace function rpc_finish_player_log_session(
+  p_session_id uuid, p_answered_count int, p_correct_count int, p_incorrect_count int,
+  p_earned_exp int, p_level_before int, p_level_after int,
+  p_completed boolean, p_exited_early boolean
+)
+returns void
+language sql
+security definer
+as $$
+  update quiz_sessions qs set
+    ended_at = now(),
+    answered_count = p_answered_count,
+    correct_count = p_correct_count,
+    incorrect_count = p_incorrect_count,
+    earned_exp = p_earned_exp,
+    level_before = p_level_before,
+    level_after = p_level_after,
+    completed = p_completed,
+    exited_early = p_exited_early
+  where qs.id = p_session_id;
+$$;
+
+-- 月間カレンダー用：指定年月の日ごとの活動量
+create or replace function rpc_get_player_log_month(p_user_id uuid, p_year int, p_month int)
+returns table (
+  study_date date, answered_count int, correct_count int,
+  incorrect_count int, earned_exp int, session_count int, leveled_up boolean
+)
+language sql
+security definer
+as $$
+  select (qs.started_at at time zone 'Asia/Tokyo')::date as study_date,
+         sum(qs.answered_count)::int,
+         sum(qs.correct_count)::int,
+         sum(qs.incorrect_count)::int,
+         sum(qs.earned_exp)::int,
+         count(*)::int,
+         bool_or(coalesce(qs.level_after, 0) > coalesce(qs.level_before, 0))
+  from quiz_sessions qs
+  where qs.user_id = p_user_id
+    and qs.answered_count > 0
+    and date_trunc('month', qs.started_at at time zone 'Asia/Tokyo') = make_date(p_year, p_month, 1)
+  group by 1
+  order by 1;
+$$;
+
+-- 選択日の合計（問題数・正誤・EXP・学習時間・セッション件数）
+create or replace function rpc_get_player_log_day_summary(p_user_id uuid, p_date date)
+returns table (
+  answered_count int, correct_count int, incorrect_count int, earned_exp int,
+  study_seconds int, session_count int, completed_session_count int, exited_early_count int,
+  first_started_at timestamptz, last_ended_at timestamptz
+)
+language sql
+security definer
+as $$
+  select
+    coalesce(sum(qs.answered_count), 0)::int,
+    coalesce(sum(qs.correct_count), 0)::int,
+    coalesce(sum(qs.incorrect_count), 0)::int,
+    coalesce(sum(qs.earned_exp), 0)::int,
+    coalesce(sum(extract(epoch from (coalesce(qs.ended_at, qs.started_at) - qs.started_at))), 0)::int,
+    count(*)::int,
+    count(*) filter (where qs.completed)::int,
+    count(*) filter (where qs.exited_early)::int,
+    min(qs.started_at),
+    max(coalesce(qs.ended_at, qs.started_at))
+  from quiz_sessions qs
+  where qs.user_id = p_user_id
+    and (qs.started_at at time zone 'Asia/Tokyo')::date = p_date;
+$$;
+
+-- 選択日のジャンル別成績（answer_historyが一次データ）
+create or replace function rpc_get_player_log_day_categories(p_user_id uuid, p_date date)
+returns table (category text, answered_count int, correct_count int)
+language sql
+security definer
+as $$
+  select coalesce(ah.category, '未分類'),
+         count(*)::int,
+         count(*) filter (where ah.correct)::int
+  from answer_history ah
+  where ah.user_id = p_user_id
+    and (ah.answered_at at time zone 'Asia/Tokyo')::date = p_date
+  group by 1
+  order by 2 desc;
+$$;
+
+-- 選択日の難易度別成績（questionsとjoinしてdifficultyを取得する）
+create or replace function rpc_get_player_log_day_difficulties(p_user_id uuid, p_date date)
+returns table (difficulty text, answered_count int, correct_count int)
+language sql
+security definer
+as $$
+  select q.difficulty,
+         count(*)::int,
+         count(*) filter (where ah.correct)::int
+  from answer_history ah
+  join questions q on q.id = ah.question_id
+  where ah.user_id = p_user_id
+    and (ah.answered_at at time zone 'Asia/Tokyo')::date = p_date
+  group by q.difficulty
+  order by case q.difficulty when '初級' then 1 when '中級' then 2 when '上級' then 3 else 4 end;
+$$;
+
+-- 選択日のセッション履歴
+create or replace function rpc_get_player_log_day_sessions(p_user_id uuid, p_date date)
+returns table (
+  id uuid, started_at timestamptz, ended_at timestamptz, mode text, category text,
+  difficulty text, answered_count int, correct_count int, incorrect_count int,
+  earned_exp int, completed boolean, exited_early boolean
+)
+language sql
+security definer
+as $$
+  select qs.id, qs.started_at, qs.ended_at, qs.mode, qs.category, qs.difficulty,
+         qs.answered_count, qs.correct_count, qs.incorrect_count, qs.earned_exp,
+         qs.completed, qs.exited_early
+  from quiz_sessions qs
+  where qs.user_id = p_user_id
+    and (qs.started_at at time zone 'Asia/Tokyo')::date = p_date
+  order by qs.started_at asc;
+$$;
+
+-- 過去に学習履歴がある年月の一覧（年月ピッカー用）
+create or replace function rpc_get_player_log_months(p_user_id uuid)
+returns table (year int, month int)
+language sql
+security definer
+as $$
+  select extract(year from d)::int, extract(month from d)::int
+  from (
+    select distinct date_trunc('month', qs.started_at at time zone 'Asia/Tokyo') as d
+    from quiz_sessions qs
+    where qs.user_id = p_user_id and qs.answered_count > 0
+  ) x
+  order by 1, 2;
+$$;
+
+-- ヘッダー用の概況（継続学習日数・累計学習日数・累計回答数）。
+-- 「学習日」の判定は1問以上回答した日のみで、ログインだけの日は含めない
+create or replace function rpc_get_player_log_overview(p_user_id uuid)
+returns table (current_streak int, best_streak int, total_study_days int, total_answered int)
+language plpgsql
+security definer
+as $$
+declare
+  v_dates date[];
+  v_today date := (now() at time zone 'Asia/Tokyo')::date;
+  v_current int := 0;
+  v_best int := 0;
+  v_run int := 0;
+  v_prev date;
+  v_total_answered int;
+  i int;
+begin
+  select u.total_answered into v_total_answered from users u where u.id = p_user_id;
+
+  select array_agg(d order by d) into v_dates
+  from (
+    select distinct (qs.started_at at time zone 'Asia/Tokyo')::date as d
+    from quiz_sessions qs
+    where qs.user_id = p_user_id and qs.answered_count > 0
+  ) x;
+
+  if v_dates is null then
+    return query select 0, 0, 0, coalesce(v_total_answered, 0);
+    return;
+  end if;
+
+  v_prev := null;
+  for i in 1 .. array_length(v_dates, 1) loop
+    if v_prev is not null and v_dates[i] = v_prev + 1 then
+      v_run := v_run + 1;
+    else
+      v_run := 1;
+    end if;
+    if v_run > v_best then v_best := v_run; end if;
+    v_prev := v_dates[i];
+  end loop;
+
+  if v_dates[array_length(v_dates, 1)] >= v_today - 1 then
+    v_current := 1;
+    for i in reverse array_length(v_dates, 1) - 1 .. 1 loop
+      if v_dates[i] = v_dates[i + 1] - 1 then
+        v_current := v_current + 1;
+      else
+        exit;
+      end if;
+    end loop;
+  end if;
+
+  return query select v_current, v_best, array_length(v_dates, 1), coalesce(v_total_answered, 0);
 end;
 $$;
 

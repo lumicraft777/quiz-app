@@ -1688,6 +1688,298 @@ body.dive-active {
 }
 
 /* ============================================================
+   PLAYER LOG（個人学習記録）
+   ----------------------------------------------------------------
+   毎日触れているという積み重ねが一目で伝わることを最優先にする。
+   未学習日は暗いだけで責めるような赤色にはせず、学習量が多い日ほど
+   シアンのエネルギーが蓄積されていくような表現にする。
+   ============================================================= */
+
+/* ---- スタート画面のPLAYER LOG導線カード ---- */
+.pl-home-card { text-align: center; }
+.pl-home-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(76px, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.pl-home-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 4px;
+  border-radius: 10px;
+  background: rgba(34, 227, 255, 0.05);
+  border: 1px solid var(--color-border);
+}
+.pl-home-stat-value { font-size: 1.05rem; font-weight: bold; color: var(--color-primary-dark); }
+.pl-home-stat-label { font-size: 0.68rem; color: var(--color-muted); }
+
+/* ---- PLAYER LOG画面：概況カード ---- */
+.pl-overview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
+  gap: 10px;
+}
+.pl-overview-stat { display: flex; flex-direction: column; gap: 2px; text-align: center; }
+.pl-overview-value {
+  font-family: "Courier New", monospace;
+  font-size: 1.2rem;
+  font-weight: bold;
+  color: var(--color-primary-dark);
+}
+.pl-overview-label { font-size: 0.68rem; color: var(--color-muted); }
+
+/* ---- 月間レポートカード ---- */
+.pl-month-report-title {
+  margin: 0 0 10px;
+  font-family: "Courier New", monospace;
+  font-size: 0.78rem;
+  letter-spacing: 0.12em;
+  color: var(--color-primary);
+}
+.pl-month-report-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
+  gap: 10px;
+}
+.pl-month-report-item { display: flex; flex-direction: column; gap: 2px; }
+.pl-mr-label { font-size: 0.7rem; color: var(--color-muted); }
+.pl-mr-value { font-size: 1.05rem; font-weight: bold; }
+
+/* ---- カレンダー ---- */
+.pl-calendar-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.pl-cal-nav-btn {
+  width: 34px; height: 34px;
+  border-radius: 50%;
+  border: 1px solid var(--color-border);
+  background: rgba(34, 227, 255, 0.05);
+  color: var(--color-primary);
+  font-size: 1rem;
+  cursor: pointer;
+}
+.pl-cal-title-btn {
+  background: none;
+  border: none;
+  font-size: 1.05rem;
+  font-weight: bold;
+  color: var(--color-text);
+  cursor: pointer;
+  padding: 4px 10px;
+  border-radius: 8px;
+}
+.pl-cal-title-btn:hover { background: rgba(34, 227, 255, 0.06); }
+.pl-month-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 10px;
+  margin-bottom: 10px;
+  border-radius: 10px;
+  background: rgba(34, 227, 255, 0.05);
+  border: 1px solid var(--color-border);
+}
+.pl-month-picker select { flex: 1 1 100px; }
+.pl-cal-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  text-align: center;
+  font-size: 0.72rem;
+  color: var(--color-muted);
+  margin-bottom: 4px;
+}
+.pl-cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+}
+.pl-cal-cell {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  min-height: 40px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  border-radius: 8px;
+  border: 1.5px solid transparent;
+  background: rgba(138, 147, 184, 0.06);
+  color: var(--color-muted);
+  font-size: 0.72rem;
+  cursor: pointer;
+  padding: 2px;
+}
+.pl-cal-cell.empty { visibility: hidden; cursor: default; }
+.pl-cal-cell.future { opacity: 0.35; cursor: default; pointer-events: none; }
+.pl-cal-cell .pl-cal-day-num { font-weight: bold; font-size: 0.82rem; }
+.pl-cal-cell .pl-cal-day-count { font-size: 0.6rem; }
+.pl-cal-cell.vol-1 { background: rgba(34, 227, 255, 0.10); color: var(--color-text); }
+.pl-cal-cell.vol-2 { background: rgba(34, 227, 255, 0.20); color: var(--color-text); }
+.pl-cal-cell.vol-3 { background: rgba(34, 227, 255, 0.32); color: var(--color-text); box-shadow: 0 0 8px rgba(34, 227, 255, 0.18); }
+.pl-cal-cell.vol-4 { background: rgba(34, 227, 255, 0.46); color: var(--color-text); box-shadow: 0 0 14px rgba(34, 227, 255, 0.3); font-weight: bold; }
+.pl-cal-cell.today { border-color: var(--color-accent); }
+.pl-cal-cell.selected { border-color: var(--color-primary); box-shadow: 0 0 0 2px rgba(34, 227, 255, 0.25); }
+.pl-cal-cell .pl-cal-levelup-dot {
+  position: absolute;
+  top: 3px; right: 4px;
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  box-shadow: 0 0 6px var(--color-accent);
+}
+.pl-cal-legend {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin-top: 12px;
+  font-size: 0.68rem;
+  color: var(--color-muted);
+}
+.pl-cal-legend-swatch {
+  width: 14px; height: 14px;
+  border-radius: 4px;
+  background: rgba(138, 147, 184, 0.1);
+}
+.pl-cal-legend-swatch.vol-0 { background: rgba(138, 147, 184, 0.1); }
+.pl-cal-legend-swatch.vol-1 { background: rgba(34, 227, 255, 0.14); }
+.pl-cal-legend-swatch.vol-2 { background: rgba(34, 227, 255, 0.24); }
+.pl-cal-legend-swatch.vol-3 { background: rgba(34, 227, 255, 0.36); }
+.pl-cal-legend-swatch.vol-4 { background: rgba(34, 227, 255, 0.5); box-shadow: 0 0 6px rgba(34, 227, 255, 0.3); }
+
+/* ---- 選択日の詳細 ---- */
+.pl-day-date {
+  margin: 0 0 10px;
+  font-weight: bold;
+  font-size: 1.02rem;
+}
+.pl-day-empty { text-align: center; padding: 12px 0; }
+.pl-day-empty-title {
+  font-family: "Courier New", monospace;
+  font-size: 0.85rem;
+  letter-spacing: 0.1em;
+  color: var(--color-muted);
+  margin: 0 0 8px;
+}
+.pl-day-empty-text {
+  font-size: 0.86rem;
+  color: var(--color-muted);
+  line-height: 1.7;
+  margin: 0 0 14px;
+}
+.pl-day-complete-tag {
+  display: inline-block;
+  margin: 0 0 10px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-family: "Courier New", monospace;
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  color: var(--color-emerald);
+  border: 1px solid rgba(61, 255, 160, 0.4);
+  background: rgba(61, 255, 160, 0.08);
+}
+.pl-day-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(84px, 1fr));
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.pl-day-stat {
+  padding: 10px 4px;
+  text-align: center;
+  border-radius: 10px;
+  background: rgba(34, 227, 255, 0.05);
+  border: 1px solid var(--color-border);
+}
+.pl-day-stat-value { display: block; font-size: 1.15rem; font-weight: bold; }
+.pl-day-stat-label { display: block; font-size: 0.66rem; color: var(--color-muted); margin-top: 2px; }
+
+.pl-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+.pl-tab-btn {
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  background: rgba(34, 227, 255, 0.04);
+  color: var(--color-muted);
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+.pl-tab-btn.selected {
+  border-color: var(--color-primary);
+  color: var(--color-primary-dark);
+  background: rgba(34, 227, 255, 0.12);
+  font-weight: bold;
+}
+.pl-breakdown-list { display: flex; flex-direction: column; gap: 8px; }
+.pl-breakdown-row {
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--color-border);
+  background: rgba(34, 227, 255, 0.03);
+}
+.pl-breakdown-row-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 4px;
+}
+.pl-breakdown-name { font-weight: bold; }
+.pl-breakdown-rate { font-family: "Courier New", monospace; color: var(--color-primary-dark); }
+.pl-breakdown-bar-track {
+  height: 5px;
+  border-radius: 4px;
+  background: rgba(138, 147, 184, 0.15);
+  overflow: hidden;
+}
+.pl-breakdown-bar-fill {
+  height: 100%;
+  background: var(--color-primary);
+  border-radius: 4px;
+}
+.pl-breakdown-sub { font-size: 0.74rem; color: var(--color-muted); margin-top: 4px; }
+
+.pl-session-list { display: flex; flex-direction: column; gap: 8px; }
+.pl-session-item {
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--color-border);
+  background: rgba(34, 227, 255, 0.03);
+}
+.pl-session-head {
+  display: flex;
+  justify-content: space-between;
+  font-family: "Courier New", monospace;
+  font-size: 0.72rem;
+  color: var(--color-primary);
+  letter-spacing: 0.06em;
+  margin-bottom: 4px;
+}
+.pl-session-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 0.64rem;
+  border: 1px solid rgba(255, 61, 110, 0.4);
+  color: #ff8fa8;
+}
+.pl-session-meta { font-size: 0.86rem; margin-bottom: 2px; }
+.pl-session-result { font-size: 0.86rem; color: var(--color-muted); }
+
+/* ============================================================
    称号（バッジ）
    ============================================================= */
 .current-title-text {

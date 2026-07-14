@@ -670,7 +670,11 @@ const state = {
   sessionCombo: 0,           // EXPボーナス判定用のセッション内連続正解数（連続正解バッジ用のcurrentStreakとは別管理）
   maxSessionCombo: 0,        // 今回のセッションで到達した最大コンボ数（任務結果画面「最大連撃数」用）
   comboBonusesGranted: new Set(), // このセッション内で既に付与済みのコンボ段階（3/5/10/15/20）
-  tenQuestionBonusGranted: false  // 「10問連続プレイ」ボーナスを既に付与したか
+  tenQuestionBonusGranted: false, // 「10問連続プレイ」ボーナスを既に付与したか
+
+  // ---- PLAYER LOG（個人学習記録）関連 ----
+  currentSessionId: null, // quiz_sessions側の行ID。beginQuizSession()で発行しrecordAnswerForUser()に渡す
+  exitedEarly: false       // 今回のセッションが途中退出で終わったか（renderResultScreen側で参照後リセットする）
 };
 
 // このセッション中に自己ベストの連続正解記録を更新したかどうか
@@ -815,7 +819,8 @@ async function recordAnswerForUser(question, isCorrect) {
       p_correct: isCorrect,
       p_mode: question.mode,
       p_category: question.category,
-      p_is_review: state.isReviewSession
+      p_is_review: state.isReviewSession,
+      p_session_id: state.currentSessionId
     });
     const row = rows[0];
     record.currentStreak = row.current_streak;
@@ -846,6 +851,79 @@ async function recordSessionResultForUser(userId, correctCount, rate) {
     console.error("自己ベストの保存に失敗しました:", err.message);
     return null;
   }
+}
+
+/* ================================================================
+   PLAYER LOG（個人学習記録）
+   ----------------------------------------------------------------
+   ・クイズ開始時にセッション行を作り（startPlayerLogSession）、
+   　結果画面表示 or 途中退出のタイミングでセッション行を確定させる
+   　（finishPlayerLogSession）。失敗してもクイズ体験自体は止めない
+   　（fire-and-forget寄りの扱い。ただしセッションIDは各回答の
+   　p_session_idに使うため、開始だけは軽くawaitして採番を待つ）。
+   ================================================================ */
+
+function generateSessionId() {
+  if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+  return `sess-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+async function startPlayerLogSession(userId, mode, category, difficulty, selectedCount) {
+  const id = generateSessionId();
+  try {
+    await supabaseRpc("rpc_start_player_log_session", {
+      p_session_id: id,
+      p_user_id: userId,
+      p_mode: mode,
+      p_category: category,
+      p_difficulty: difficulty,
+      p_selected_count: String(selectedCount)
+    });
+  } catch (err) {
+    console.error("学習セッションの開始記録に失敗しました:", err.message);
+  }
+  return id;
+}
+
+async function finishPlayerLogSession(sessionId, info) {
+  if (!sessionId) return;
+  try {
+    await supabaseRpc("rpc_finish_player_log_session", {
+      p_session_id: sessionId,
+      p_answered_count: info.answeredCount,
+      p_correct_count: info.correctCount,
+      p_incorrect_count: info.incorrectCount,
+      p_earned_exp: info.earnedExp,
+      p_level_before: info.levelBefore,
+      p_level_after: info.levelAfter,
+      p_completed: info.completed,
+      p_exited_early: info.exitedEarly
+    });
+  } catch (err) {
+    console.error("学習セッションの終了記録に失敗しました:", err.message);
+  }
+}
+
+function fetchPlayerLogMonth(userId, year, month) {
+  return supabaseRpc("rpc_get_player_log_month", { p_user_id: userId, p_year: year, p_month: month });
+}
+function fetchPlayerLogDaySummary(userId, date) {
+  return supabaseRpc("rpc_get_player_log_day_summary", { p_user_id: userId, p_date: date }).then((r) => r[0]);
+}
+function fetchPlayerLogDayCategories(userId, date) {
+  return supabaseRpc("rpc_get_player_log_day_categories", { p_user_id: userId, p_date: date });
+}
+function fetchPlayerLogDayDifficulties(userId, date) {
+  return supabaseRpc("rpc_get_player_log_day_difficulties", { p_user_id: userId, p_date: date });
+}
+function fetchPlayerLogDaySessions(userId, date) {
+  return supabaseRpc("rpc_get_player_log_day_sessions", { p_user_id: userId, p_date: date });
+}
+function fetchPlayerLogMonths(userId) {
+  return supabaseRpc("rpc_get_player_log_months", { p_user_id: userId });
+}
+function fetchPlayerLogOverview(userId) {
+  return supabaseRpc("rpc_get_player_log_overview", { p_user_id: userId }).then((r) => r[0]);
 }
 
 // ランキング（全ユーザー横断）を取得する
@@ -1150,6 +1228,7 @@ function renderBestRecordOnStart() {
 async function refreshHomeExtras() {
   if (!currentUserRecord) return;
   renderStreakBanner();
+  refreshPlayerLogHomeCard();
   try {
     const [badges, missions] = await Promise.all([
       fetchBadges(currentUserRecord.id),
@@ -1533,6 +1612,7 @@ async function initApp() {
   setupProductDetail();
   setupOnboarding();
   setupFirstAreaPopup();
+  setupPlayerLog();
   setupDailyMissionsClickHandler();
   setupMissionsToggle();
   setupRankingTabs();
@@ -2375,6 +2455,452 @@ function setupStartScreen() {
   });
 }
 
+/* ================================================================
+   PLAYER LOG画面（個人学習記録）
+   ----------------------------------------------------------------
+   ・月間カレンダー＋選択日の詳細（サマリー／ジャンル別／難易度別／
+   　セッション履歴）を表示する、他プレイヤーからは見えない個人専用画面。
+   ・表示のたびに現在の状態から過去を推測するのではなく、
+   　quiz_sessions／answer_historyという一次データをRPC経由で
+   　都度集計して描画する（データが古くなる/ズレる心配がない）。
+   ================================================================ */
+
+const PL_MONTH_EN = [
+  "JANUARY", "FEBRUARY", "MARCH", "APRIL", "MAY", "JUNE",
+  "JULY", "AUGUST", "SEPTEMBER", "OCTOBER", "NOVEMBER", "DECEMBER"
+];
+const PL_WEEKDAY_JP = ["日", "月", "火", "水", "木", "金", "土"];
+const PL_MODE_LABEL = { knowledge: "基礎任務", practice: "判断任務", mix: "混成任務" };
+
+const playerLogState = {
+  year: null,
+  month: null,
+  selectedDate: null, // "YYYY-MM-DD"
+  monthData: []
+};
+
+function plPad2(n) { return String(n).padStart(2, "0"); }
+function plDateKey(y, m, d) { return `${y}-${plPad2(m)}-${plPad2(d)}`; }
+function plTodayKey() {
+  const now = new Date();
+  return plDateKey(now.getFullYear(), now.getMonth() + 1, now.getDate());
+}
+
+function setupPlayerLog() {
+  document.getElementById("btn-show-player-log").addEventListener("click", openPlayerLog);
+  document.getElementById("btn-open-player-log").addEventListener("click", openPlayerLog);
+  document.getElementById("btn-player-log-back-top").addEventListener("click", () => showScreen("screen-start"));
+
+  document.getElementById("pl-cal-prev").addEventListener("click", () => {
+    let { year, month } = playerLogState;
+    month -= 1;
+    if (month < 1) { month = 12; year -= 1; }
+    loadPlayerLogMonth(year, month);
+  });
+  document.getElementById("pl-cal-next").addEventListener("click", () => {
+    let { year, month } = playerLogState;
+    month += 1;
+    if (month > 12) { month = 1; year += 1; }
+    loadPlayerLogMonth(year, month);
+  });
+
+  document.getElementById("pl-cal-title").addEventListener("click", () => {
+    const panel = document.getElementById("pl-month-picker");
+    if (panel.hidden) {
+      populatePlayerLogMonthPicker();
+      panel.hidden = false;
+    } else {
+      panel.hidden = true;
+    }
+  });
+  document.getElementById("pl-picker-go").addEventListener("click", () => {
+    const y = Number(document.getElementById("pl-picker-year").value);
+    const m = Number(document.getElementById("pl-picker-month").value);
+    document.getElementById("pl-month-picker").hidden = true;
+    playSelectSound();
+    loadPlayerLogMonth(y, m);
+  });
+
+  document.querySelectorAll("#pl-day-tabs .pl-tab-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll("#pl-day-tabs .pl-tab-btn").forEach((b) => b.classList.remove("selected"));
+      btn.classList.add("selected");
+      playSelectSound();
+      const tab = btn.dataset.pltab;
+      document.querySelectorAll(".pl-tab-panel").forEach((p) => {
+        p.hidden = p.dataset.pltabPanel !== tab;
+      });
+    });
+  });
+
+  document.getElementById("pl-day-start-btn").addEventListener("click", () => showScreen("screen-start"));
+  document.getElementById("pl-day-retry-btn").addEventListener("click", () => {
+    if (playerLogState.selectedDate) loadPlayerLogDayDetail(playerLogState.selectedDate);
+  });
+}
+
+function populatePlayerLogMonthPicker() {
+  const yearSel = document.getElementById("pl-picker-year");
+  const monthSel = document.getElementById("pl-picker-month");
+  if (yearSel.options.length === 0) {
+    const nowYear = new Date().getFullYear();
+    for (let y = nowYear - 5; y <= nowYear; y++) {
+      const opt = document.createElement("option");
+      opt.value = String(y);
+      opt.textContent = `${y}年`;
+      yearSel.appendChild(opt);
+    }
+    for (let m = 1; m <= 12; m++) {
+      const opt = document.createElement("option");
+      opt.value = String(m);
+      opt.textContent = `${m}月`;
+      monthSel.appendChild(opt);
+    }
+  }
+  yearSel.value = String(playerLogState.year);
+  monthSel.value = String(playerLogState.month);
+}
+
+// PLAYER LOG画面を開く。初回表示時の選択日は
+// 「今日学習済みなら今日 → 今月に学習日があれば直近の学習日 →
+// 　記録のある最新の月へ切り替えてその最新の学習日 → それも無ければ今日」の順に決める
+async function openPlayerLog() {
+  if (!currentUserRecord) return;
+  showScreen("screen-player-log");
+  document.getElementById("pl-month-picker").hidden = true;
+
+  loadPlayerLogOverview();
+
+  const now = new Date();
+  let y = now.getFullYear();
+  let m = now.getMonth() + 1;
+  await loadPlayerLogMonth(y, m);
+
+  const todayKey = plTodayKey();
+  const todayRow = playerLogState.monthData.find((r) => r.study_date === todayKey);
+  if (todayRow && todayRow.answered_count > 0) {
+    playerLogState.selectedDate = todayKey;
+  } else {
+    const pastRows = playerLogState.monthData.filter((r) => r.study_date <= todayKey && r.answered_count > 0);
+    if (pastRows.length > 0) {
+      playerLogState.selectedDate = pastRows[pastRows.length - 1].study_date;
+    } else {
+      try {
+        const months = await fetchPlayerLogMonths(currentUserRecord.id);
+        if (months.length > 0) {
+          const latest = months[months.length - 1];
+          if (latest.year !== y || latest.month !== m) {
+            await loadPlayerLogMonth(latest.year, latest.month);
+          }
+        }
+      } catch (err) {
+        console.error("学習記録月一覧の取得に失敗しました:", err.message);
+      }
+      const rows = playerLogState.monthData.filter((r) => r.answered_count > 0);
+      playerLogState.selectedDate = rows.length > 0 ? rows[rows.length - 1].study_date : todayKey;
+    }
+  }
+
+  renderPlayerLogCalendar();
+  loadPlayerLogDayDetail(playerLogState.selectedDate);
+}
+
+async function loadPlayerLogOverview() {
+  if (!currentUserRecord) return null;
+  try {
+    const ov = await fetchPlayerLogOverview(currentUserRecord.id);
+    document.getElementById("pl-overview-current-streak").textContent = `${ov.current_streak} DAYS`;
+    document.getElementById("pl-overview-best-streak").textContent = `${ov.best_streak} DAYS`;
+    document.getElementById("pl-overview-total-days").textContent = `${ov.total_study_days} DAYS`;
+    document.getElementById("pl-overview-total-answered").textContent = `${ov.total_answered.toLocaleString()}`;
+    return ov;
+  } catch (err) {
+    console.error("学習概況の取得に失敗しました:", err.message);
+    return null;
+  }
+}
+
+async function loadPlayerLogMonth(year, month) {
+  playerLogState.year = year;
+  playerLogState.month = month;
+  document.getElementById("pl-cal-title").textContent = `＜ ${year}年${month}月 ＞`;
+  document.getElementById("pl-month-report-title").textContent = `${PL_MONTH_EN[month - 1]} REPORT`;
+  try {
+    playerLogState.monthData = await fetchPlayerLogMonth(currentUserRecord.id, year, month);
+  } catch (err) {
+    console.error("月間学習記録の取得に失敗しました:", err.message);
+    playerLogState.monthData = [];
+  }
+  renderPlayerLogMonthReport();
+  renderPlayerLogCalendar();
+}
+
+function renderPlayerLogMonthReport() {
+  const rows = playerLogState.monthData;
+  const answered = rows.reduce((s, r) => s + r.answered_count, 0);
+  const correct = rows.reduce((s, r) => s + r.correct_count, 0);
+  const exp = rows.reduce((s, r) => s + r.earned_exp, 0);
+  const rate = answered > 0 ? Math.round((correct / answered) * 1000) / 10 : null;
+  document.getElementById("pl-mr-days").textContent = `${rows.length}日`;
+  document.getElementById("pl-mr-answered").textContent = `${answered}問`;
+  document.getElementById("pl-mr-rate").textContent = rate === null ? "記録なし" : `${rate}%`;
+  document.getElementById("pl-mr-exp").textContent = `+${exp.toLocaleString()}`;
+}
+
+function plVolClass(count) {
+  if (count <= 0) return "vol-0";
+  if (count < 5) return "vol-1";
+  if (count < 10) return "vol-2";
+  if (count < 20) return "vol-3";
+  return "vol-4";
+}
+
+function renderPlayerLogCalendar() {
+  const grid = document.getElementById("pl-cal-grid");
+  grid.innerHTML = "";
+  const { year, month } = playerLogState;
+  const rowsByDate = {};
+  playerLogState.monthData.forEach((r) => { rowsByDate[r.study_date] = r; });
+
+  const firstDay = new Date(year, month - 1, 1);
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const jsDow = firstDay.getDay(); // 0=日 .. 6=土
+  const leadBlanks = (jsDow + 6) % 7; // 月曜始まりに変換
+  const todayKey = plTodayKey();
+
+  for (let i = 0; i < leadBlanks; i++) {
+    const blank = document.createElement("div");
+    blank.className = "pl-cal-cell empty";
+    grid.appendChild(blank);
+  }
+
+  for (let d = 1; d <= daysInMonth; d++) {
+    const key = plDateKey(year, month, d);
+    const row = rowsByDate[key];
+    const count = row ? row.answered_count : 0;
+    const isFuture = key > todayKey;
+
+    const cell = document.createElement("button");
+    cell.type = "button";
+    cell.className = `pl-cal-cell ${plVolClass(count)}`;
+    if (isFuture) cell.classList.add("future");
+    if (key === todayKey) cell.classList.add("today");
+    if (key === playerLogState.selectedDate) cell.classList.add("selected");
+
+    const dayNum = document.createElement("span");
+    dayNum.className = "pl-cal-day-num";
+    dayNum.textContent = String(d);
+    cell.appendChild(dayNum);
+
+    if (count > 0) {
+      const cnt = document.createElement("span");
+      cnt.className = "pl-cal-day-count";
+      cnt.textContent = `${count}問`;
+      cell.appendChild(cnt);
+    }
+    if (row && row.leveled_up) {
+      const dot = document.createElement("span");
+      dot.className = "pl-cal-levelup-dot";
+      cell.appendChild(dot);
+    }
+
+    if (!isFuture) {
+      cell.addEventListener("click", () => {
+        playSelectSound();
+        playerLogState.selectedDate = key;
+        renderPlayerLogCalendar();
+        loadPlayerLogDayDetail(key);
+      });
+    }
+    grid.appendChild(cell);
+  }
+}
+
+function plFormatDateLabel(key) {
+  const [y, m, d] = key.split("-").map(Number);
+  const dow = new Date(y, m - 1, d).getDay();
+  return `${y}年${m}月${d}日 ${PL_WEEKDAY_JP[dow]}曜日`;
+}
+
+function plFormatStudyDuration(seconds) {
+  const totalMin = Math.round(seconds / 60);
+  if (totalMin < 60) return `${totalMin}分`;
+  const h = Math.floor(totalMin / 60);
+  const mi = totalMin % 60;
+  return `${h}時間${mi}分`;
+}
+
+function plFormatTimeHM(iso) {
+  const d = new Date(iso);
+  return `${plPad2(d.getHours())}:${plPad2(d.getMinutes())}`;
+}
+
+async function loadPlayerLogDayDetail(dateKeyStr) {
+  const loadingEl = document.getElementById("pl-day-loading");
+  const errorEl = document.getElementById("pl-day-error");
+  const emptyEl = document.getElementById("pl-day-empty");
+  const contentEl = document.getElementById("pl-day-content");
+
+  document.getElementById("pl-day-date").textContent = plFormatDateLabel(dateKeyStr);
+  loadingEl.hidden = false;
+  errorEl.hidden = true;
+  emptyEl.hidden = true;
+  contentEl.hidden = true;
+
+  try {
+    const [summary, categories, difficulties, sessions] = await Promise.all([
+      fetchPlayerLogDaySummary(currentUserRecord.id, dateKeyStr),
+      fetchPlayerLogDayCategories(currentUserRecord.id, dateKeyStr),
+      fetchPlayerLogDayDifficulties(currentUserRecord.id, dateKeyStr),
+      fetchPlayerLogDaySessions(currentUserRecord.id, dateKeyStr)
+    ]);
+    loadingEl.hidden = true;
+
+    if (!summary || summary.answered_count === 0) {
+      emptyEl.hidden = false;
+      document.getElementById("pl-day-start-btn").hidden = dateKeyStr !== plTodayKey();
+      return;
+    }
+
+    contentEl.hidden = false;
+    renderPlayerLogDaySummary(summary);
+    renderBreakdownList("pl-category-list", categories, "category");
+    renderBreakdownList("pl-difficulty-list", difficulties, "difficulty");
+    renderPlayerLogDaySessions(sessions);
+  } catch (err) {
+    console.error("学習記録の取得に失敗しました:", err.message);
+    loadingEl.hidden = true;
+    errorEl.hidden = false;
+  }
+}
+
+function renderPlayerLogDaySummary(s) {
+  const rate = s.answered_count > 0 ? Math.round((s.correct_count / s.answered_count) * 1000) / 10 : null;
+  document.getElementById("pl-day-answered").textContent = `${s.answered_count}問`;
+  document.getElementById("pl-day-correct").textContent = `${s.correct_count}問`;
+  document.getElementById("pl-day-incorrect").textContent = `${s.incorrect_count}問`;
+  document.getElementById("pl-day-rate").textContent = rate === null ? "記録なし" : `${rate}%`;
+  document.getElementById("pl-day-time").textContent = plFormatStudyDuration(s.study_seconds);
+  document.getElementById("pl-day-exp").textContent = `+${s.earned_exp} EXP`;
+}
+
+// ジャンル別・難易度別で共通の内訳リスト（項目名・正解率バー・n/n問正解）を組み立てる
+function renderBreakdownList(containerId, rows, labelKey) {
+  const wrap = document.getElementById(containerId);
+  wrap.innerHTML = "";
+  if (rows.length === 0) {
+    const p = document.createElement("p");
+    p.className = "muted-text";
+    p.textContent = "この日のデータはありません。";
+    wrap.appendChild(p);
+    return;
+  }
+  rows.forEach((r) => {
+    wrap.appendChild(buildBreakdownRow(r[labelKey], r.answered_count, r.correct_count));
+  });
+}
+
+function buildBreakdownRow(label, answered, correct) {
+  const rate = answered > 0 ? Math.round((correct / answered) * 1000) / 10 : 0;
+  const row = document.createElement("div");
+  row.className = "pl-breakdown-row";
+
+  const head = document.createElement("div");
+  head.className = "pl-breakdown-row-head";
+  const nameEl = document.createElement("span");
+  nameEl.className = "pl-breakdown-name";
+  nameEl.textContent = label;
+  const rateEl = document.createElement("span");
+  rateEl.className = "pl-breakdown-rate";
+  rateEl.textContent = `${rate}%`;
+  head.appendChild(nameEl);
+  head.appendChild(rateEl);
+
+  const track = document.createElement("div");
+  track.className = "pl-breakdown-bar-track";
+  const fill = document.createElement("div");
+  fill.className = "pl-breakdown-bar-fill";
+  fill.style.width = `${Math.min(100, rate)}%`;
+  track.appendChild(fill);
+
+  const sub = document.createElement("p");
+  sub.className = "pl-breakdown-sub";
+  sub.textContent = `${correct} / ${answered}問正解`;
+
+  row.appendChild(head);
+  row.appendChild(track);
+  row.appendChild(sub);
+  return row;
+}
+
+function renderPlayerLogDaySessions(rows) {
+  const wrap = document.getElementById("pl-session-list");
+  wrap.innerHTML = "";
+  if (rows.length === 0) {
+    const p = document.createElement("p");
+    p.className = "muted-text";
+    p.textContent = "この日のセッション記録はありません。";
+    wrap.appendChild(p);
+    return;
+  }
+  rows.forEach((r, i) => {
+    const item = document.createElement("div");
+    item.className = "pl-session-item";
+
+    const head = document.createElement("p");
+    head.className = "pl-session-head";
+    const timeRange = `${plFormatTimeHM(r.started_at)}〜${r.ended_at ? plFormatTimeHM(r.ended_at) : "-"}`;
+    head.textContent = `SESSION ${plPad2(i + 1)}　${timeRange}`;
+    if (r.exited_early) {
+      const tag = document.createElement("span");
+      tag.className = "pl-session-tag";
+      tag.textContent = "途中退出";
+      head.appendChild(tag);
+    }
+
+    const meta = document.createElement("p");
+    meta.className = "pl-session-meta";
+    const modeLabel = PL_MODE_LABEL[r.mode] || r.mode || "任務";
+    const parts = [modeLabel];
+    if (r.category && r.category !== "全エリア") parts.push(r.category);
+    if (r.difficulty && r.difficulty !== "全レベル") parts.push(r.difficulty);
+    meta.textContent = parts.join("／");
+
+    const result = document.createElement("p");
+    result.className = "pl-session-result";
+    result.textContent = `${r.answered_count}問中${r.correct_count}問正解／獲得EXP：+${r.earned_exp}`;
+
+    item.appendChild(head);
+    item.appendChild(meta);
+    item.appendChild(result);
+    wrap.appendChild(item);
+  });
+}
+
+// スタート画面のPLAYER LOG導線カード（今日の実績＋連続学習日数）を更新する
+async function refreshPlayerLogHomeCard() {
+  const card = document.getElementById("player-log-home-card");
+  if (!currentUserRecord || !card) return;
+  card.hidden = false;
+  const todayKey = plTodayKey();
+  try {
+    const [summary, overview] = await Promise.all([
+      fetchPlayerLogDaySummary(currentUserRecord.id, todayKey),
+      fetchPlayerLogOverview(currentUserRecord.id)
+    ]);
+    const answered = summary ? summary.answered_count : 0;
+    const correct = summary ? summary.correct_count : 0;
+    const exp = summary ? summary.earned_exp : 0;
+    const rate = answered > 0 ? Math.round((correct / answered) * 1000) / 10 : null;
+    document.getElementById("pl-home-today-count").textContent = `${answered}問`;
+    document.getElementById("pl-home-today-rate").textContent = rate === null ? "-" : `${rate}%`;
+    document.getElementById("pl-home-today-exp").textContent = `+${exp} EXP`;
+    document.getElementById("pl-home-streak").textContent = overview ? `${overview.current_streak}日` : "-";
+  } catch (err) {
+    console.error("PLAYER LOGホームカードの取得に失敗しました:", err.message);
+  }
+}
+
 // 現在選択中の攻略者ボードの種類（タブ）
 let currentRankingType = "overall";
 
@@ -2569,7 +3095,7 @@ function validateStartButton() {
 }
 
 // ---- 出題プールを組み立ててセッションを開始する ----
-function beginQuizSession() {
+async function beginQuizSession() {
   const pool = buildFilteredPool(state.mode, state.category, state.level);
 
   if (pool.length === 0) {
@@ -2585,8 +3111,14 @@ function beginQuizSession() {
   state.currentIndex = 0;
   state.userAnswers = [];
   state.isReviewSession = state.category === WRONG_CATEGORY || state.category === CORRECT_CATEGORY;
+  state.exitedEarly = false;
   newStreakRecordThisSession = false;
   resetSessionExpTracking();
+
+  // PLAYER LOG用のセッション行を作る（各回答のsession_idに使うため開始を待つ）
+  state.currentSessionId = currentUserRecord
+    ? await startPlayerLogSession(currentUserRecord.id, state.mode, state.category, state.level, state.countOption)
+    : null;
 
   showScreen("screen-quiz");
   renderQuestion();
@@ -2656,6 +3188,7 @@ function quitQuizEarly() {
   const ok = confirm(message);
   if (!ok) return;
 
+  state.exitedEarly = true;
   showScreen("screen-result");
   renderResultScreen();
 }
@@ -3040,6 +3573,8 @@ async function renderResultScreen() {
   // 経験値（EXP）はセッション中クライアント側で積算しておき、結果画面表示時に
   // まとめてサーバーへ反映する（通信回数を抑えるため。反映はここで1回のみawaitする）
   document.getElementById("result-exp-gained").textContent = `+${state.sessionExp} EXP 獲得！`;
+  let expLevelBefore = currentUserRecord ? currentUserRecord.level : null;
+  let expLevelAfter = expLevelBefore;
   if (currentUserRecord) {
     const beforeLevel = currentUserRecord.level;
     const beforeTitle = getLevelTitle(beforeLevel);
@@ -3054,6 +3589,7 @@ async function renderResultScreen() {
         currentUserRecord.level = expResult.new_level;
         currentUserRecord.exp = expResult.exp;
         currentUserRecord.totalExp = expResult.total_exp;
+        expLevelAfter = expResult.new_level;
 
         // ゲージのアニメーションを見せるため、少し間を置いてから新しい値で再描画する
         setTimeout(() => {
@@ -3080,6 +3616,20 @@ async function renderResultScreen() {
       setTimeout(() => showBadgeUnlockQueue(newBadges), 2000);
     }
     refreshHomeExtras(); // 次にスタート画面へ戻ったときのため、称号・ミッション表示を更新しておく
+
+    // PLAYER LOG用のセッション行を確定させる（途中退出でも回答済み分・獲得EXPは記録する）
+    finishPlayerLogSession(state.currentSessionId, {
+      answeredCount: total,
+      correctCount,
+      incorrectCount: damageCount,
+      earnedExp: state.sessionExp,
+      levelBefore: expLevelBefore,
+      levelAfter: expLevelAfter,
+      completed: !state.exitedEarly,
+      exitedEarly: state.exitedEarly
+    });
+    state.currentSessionId = null;
+    state.exitedEarly = false;
   }
 
   // 高得点・自己ベスト更新時は紙吹雪でお祝いする

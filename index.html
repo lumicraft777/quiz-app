@@ -9,7 +9,7 @@
 <!-- style.css / script.js を編集したら ?v= の数字を必ず増やすこと。
      増やさないと、ブラウザにキャッシュされた古いファイルが
      読み込まれ続け、コード修正がユーザーの端末に反映されないため。 -->
-<link rel="stylesheet" href="style.css?v=30">
+<link rel="stylesheet" href="style.css?v=31">
 </head>
 <body>
 
@@ -291,6 +291,7 @@
       <span id="current-user-label" class="current-user-label"></span>
       <span class="user-bar-links">
         <button type="button" id="btn-show-ranking" class="link-btn">攻略者ボードを見る</button>
+        <button type="button" id="btn-show-player-log" class="link-btn">PLAYER LOG</button>
         <button type="button" id="btn-switch-user" class="link-btn">プレイヤーを切り替える</button>
       </span>
     </div>
@@ -361,6 +362,18 @@
       <button type="button" id="btn-reload-data" class="link-btn" hidden>再同期</button>
     </div>
 
+    <!-- PLAYER LOG導線カード：今日の学習量を一目で見せ、詳細記録画面へ誘導する -->
+    <div class="card pl-home-card" id="player-log-home-card" hidden>
+      <h2 class="card-title">PLAYER LOG</h2>
+      <div class="pl-home-stats">
+        <div class="pl-home-stat"><span class="pl-home-stat-value" id="pl-home-today-count">0問</span><span class="pl-home-stat-label">今日の問題数</span></div>
+        <div class="pl-home-stat"><span class="pl-home-stat-value" id="pl-home-today-rate">-</span><span class="pl-home-stat-label">今日の正解率</span></div>
+        <div class="pl-home-stat"><span class="pl-home-stat-value" id="pl-home-today-exp">+0 EXP</span><span class="pl-home-stat-label">今日の獲得EXP</span></div>
+        <div class="pl-home-stat"><span class="pl-home-stat-value" id="pl-home-streak">0日</span><span class="pl-home-stat-label">連続学習日数</span></div>
+      </div>
+      <button type="button" id="btn-open-player-log" class="link-btn">PLAYER LOGを見る →</button>
+    </div>
+
     <!-- 達成したミッション：称号カードのすぐ上に表示し、報酬の受け取り漏れに気づきやすくする -->
     <div class="card" id="achieved-missions-card" hidden>
       <h2 class="card-title">達成したミッション</h2>
@@ -404,6 +417,113 @@
     </div>
 
     <button type="button" id="btn-ranking-back" class="btn-primary btn-large">戻る</button>
+  </section>
+
+  <!-- ============================================================
+       画面1.6：PLAYER LOG（個人学習記録）
+       いつ・何問・どのジャンル・どの難易度を学習し、どれだけEXPを
+       得たかを月間カレンダー＋日別詳細で振り返れる、近未来RPG風の
+       活動ログ画面。他プレイヤーのデータは一切含まない個人専用画面。
+  ============================================================= -->
+  <section id="screen-player-log" class="screen">
+    <button type="button" id="btn-player-log-back-top" class="ranking-back-top">← 戻る</button>
+    <header class="app-header">
+      <h1>PLAYER LOG</h1>
+      <p class="app-sub">学習活動記録</p>
+    </header>
+
+    <div class="card pl-overview-card">
+      <div class="pl-overview-grid">
+        <div class="pl-overview-stat"><span class="pl-overview-value" id="pl-overview-current-streak">-</span><span class="pl-overview-label">現在の連続学習</span></div>
+        <div class="pl-overview-stat"><span class="pl-overview-value" id="pl-overview-best-streak">-</span><span class="pl-overview-label">過去最高連続学習</span></div>
+        <div class="pl-overview-stat"><span class="pl-overview-value" id="pl-overview-total-days">-</span><span class="pl-overview-label">累計学習日数</span></div>
+        <div class="pl-overview-stat"><span class="pl-overview-value" id="pl-overview-total-answered">-</span><span class="pl-overview-label">累計回答数</span></div>
+      </div>
+    </div>
+
+    <div class="card pl-month-report-card">
+      <p class="pl-month-report-title" id="pl-month-report-title">JULY REPORT</p>
+      <div class="pl-month-report-grid" id="pl-month-report-grid">
+        <div class="pl-month-report-item"><span class="pl-mr-label">学習日数</span><span class="pl-mr-value" id="pl-mr-days">-</span></div>
+        <div class="pl-month-report-item"><span class="pl-mr-label">挑戦問題数</span><span class="pl-mr-value" id="pl-mr-answered">-</span></div>
+        <div class="pl-month-report-item"><span class="pl-mr-label">平均正解率</span><span class="pl-mr-value" id="pl-mr-rate">-</span></div>
+        <div class="pl-month-report-item"><span class="pl-mr-label">獲得EXP</span><span class="pl-mr-value" id="pl-mr-exp">-</span></div>
+      </div>
+    </div>
+
+    <div class="card pl-calendar-card">
+      <div class="pl-calendar-nav">
+        <button type="button" id="pl-cal-prev" class="pl-cal-nav-btn" aria-label="前の月へ">＜</button>
+        <button type="button" id="pl-cal-title" class="pl-cal-title-btn"></button>
+        <button type="button" id="pl-cal-next" class="pl-cal-nav-btn" aria-label="次の月へ">＞</button>
+      </div>
+
+      <!-- 年月直接選択パネル（年月ラベルをタップすると開く） -->
+      <div id="pl-month-picker" class="pl-month-picker" hidden>
+        <select id="pl-picker-year" class="select-box"></select>
+        <select id="pl-picker-month" class="select-box"></select>
+        <button type="button" id="pl-picker-go" class="dive-btn-primary">この月へ移動</button>
+      </div>
+
+      <div class="pl-cal-weekdays">
+        <span>月</span><span>火</span><span>水</span><span>木</span><span>金</span><span>土</span><span>日</span>
+      </div>
+      <div class="pl-cal-grid" id="pl-cal-grid"></div>
+
+      <div class="pl-cal-legend">
+        <span class="pl-cal-legend-label">少ない</span>
+        <span class="pl-cal-legend-swatch vol-0"></span>
+        <span class="pl-cal-legend-swatch vol-1"></span>
+        <span class="pl-cal-legend-swatch vol-2"></span>
+        <span class="pl-cal-legend-swatch vol-3"></span>
+        <span class="pl-cal-legend-swatch vol-4"></span>
+        <span class="pl-cal-legend-label">多い</span>
+      </div>
+    </div>
+
+    <div class="card pl-day-card">
+      <p class="pl-day-date" id="pl-day-date">-</p>
+
+      <div id="pl-day-empty" class="pl-day-empty" hidden>
+        <p class="pl-day-empty-title">NO ACTIVITY RECORDED</p>
+        <p class="pl-day-empty-text">この日の学習記録はありません。<br>次の訓練が、新しい活動ログとして記録されます。</p>
+        <button type="button" id="pl-day-start-btn" class="dive-btn-primary" hidden>学習を開始する</button>
+      </div>
+
+      <div id="pl-day-content" hidden>
+        <p class="pl-day-complete-tag">TRAINING COMPLETE</p>
+        <div class="pl-day-stats-grid">
+          <div class="pl-day-stat"><span class="pl-day-stat-value" id="pl-day-answered">-</span><span class="pl-day-stat-label">挑戦問題数</span></div>
+          <div class="pl-day-stat"><span class="pl-day-stat-value" id="pl-day-correct">-</span><span class="pl-day-stat-label">正解数</span></div>
+          <div class="pl-day-stat"><span class="pl-day-stat-value" id="pl-day-incorrect">-</span><span class="pl-day-stat-label">不正解数</span></div>
+          <div class="pl-day-stat"><span class="pl-day-stat-value" id="pl-day-rate">-</span><span class="pl-day-stat-label">正解率</span></div>
+          <div class="pl-day-stat"><span class="pl-day-stat-value" id="pl-day-time">-</span><span class="pl-day-stat-label">学習時間</span></div>
+          <div class="pl-day-stat"><span class="pl-day-stat-value" id="pl-day-exp">-</span><span class="pl-day-stat-label">獲得EXP</span></div>
+        </div>
+
+        <div class="pl-tabs" id="pl-day-tabs">
+          <button type="button" class="pl-tab-btn selected" data-pltab="category">ジャンル別</button>
+          <button type="button" class="pl-tab-btn" data-pltab="difficulty">難易度別</button>
+          <button type="button" class="pl-tab-btn" data-pltab="sessions">セッション履歴</button>
+        </div>
+
+        <div class="pl-tab-panel" data-pltab-panel="category">
+          <div id="pl-category-list" class="pl-breakdown-list"></div>
+        </div>
+        <div class="pl-tab-panel" data-pltab-panel="difficulty" hidden>
+          <div id="pl-difficulty-list" class="pl-breakdown-list"></div>
+        </div>
+        <div class="pl-tab-panel" data-pltab-panel="sessions" hidden>
+          <div id="pl-session-list" class="pl-session-list"></div>
+        </div>
+      </div>
+
+      <p id="pl-day-loading" class="status-loading" hidden>ACTIVITY DATA LOADING...</p>
+      <div id="pl-day-error" hidden>
+        <p class="warning-text">学習記録を読み込めませんでした。通信状態を確認して、もう一度お試しください。</p>
+        <button type="button" id="pl-day-retry-btn" class="link-btn">再読み込み</button>
+      </div>
+    </div>
   </section>
 
   <!-- ============================================================
@@ -583,6 +703,6 @@
 
 </div>
 
-<script src="script.js?v=33"></script>
+<script src="script.js?v=34"></script>
 </body>
 </html>
