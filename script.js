@@ -664,11 +664,10 @@ const CATEGORY_ORDER = [
   "電気代削減", "初期費用", "EV/V2H", "保証・安心", "設置スペース", "営業トーク判断"
 ];
 
-// エリア選択プルダウンをグループ化するためのジャンル分け。
+// エリア選択チップの表示名（章番号プレフィックス）を決めるためのジャンル分け。
 // 製品データに依存しない座学系カテゴリは章ごとのジャンルに、
 // 具体的な製品（型番・スペック・営業トーク等）に関するカテゴリは「製品問題」。
 // ここに載っていないカテゴリ（将来の新カテゴリ）は「製品問題」扱いにする。
-const GENRE_ORDER = ["1章 基礎知識", "2章 システム設計・発電量計算", "3章 機器・部品の知識", "4章 施工・設置の知識", "5章 系統連系と電力制度", "6章 関係法規", "7章 維持管理・O&M", "8章 販売・提案・環境", "製品問題"];
 const CATEGORY_GENRE = {
   "基礎知識": "1章 基礎知識",
   "太陽光発電": "1章 基礎知識",
@@ -684,12 +683,12 @@ function genreOfCategory(cat) {
   return CATEGORY_GENRE[cat] || "製品問題";
 }
 // エリア選択の表示名：個別に上書き指定がある場合はそれを使う
-// （例：「基礎知識」は入門レベルの内容であることが分かるよう「入門レベル」と表示）。
+// （例：「基礎知識」は入門レベルの内容であることが分かるよう「入門」と表示）。
 // それ以外は、所属ジャンルが「N章 ...」であればカテゴリ名の頭に同じ「N章」を
 // 付けて表示する（例：「太陽光発電」→「1章 太陽光発電」）。
 // 製品問題ジャンルのカテゴリは章番号を付けずそのまま表示する。
 const CATEGORY_DISPLAY_OVERRIDE = {
-  "基礎知識": "入門レベル"
+  "基礎知識": "入門"
 };
 function categoryDisplayLabel(cat) {
   if (CATEGORY_DISPLAY_OVERRIDE[cat]) return CATEGORY_DISPLAY_OVERRIDE[cat];
@@ -707,7 +706,7 @@ const CORRECT_CATEGORY = "正解問題";
 // アプリの状態（グローバル管理・現在のセッションに関するものだけ）
 const state = {
   mode: null,        // "knowledge" | "practice" | "mix"
-  category: "全エリア",
+  categories: new Set(), // 選択中のエリア（複数選択可）。空＝「全エリア」（絞り込みなし）
   level: "全レベル",  // "全レベル" | "初級" | "中級" | "上級"（出題の難易度フィルタ。EXPのユーザーレベルとは別物）
   countOption: null, // "5" | "10" | "20" | "all"
   sessionQuestions: [],
@@ -1762,7 +1761,7 @@ async function startAsUser(rawName, rawPin) {
     refreshAllExpGauges();
     refreshHomeExtras();
     updateDataStatusDetail();
-    if (state.mode) populateCategorySelect(); // 「要再挑戦リスト」「正解問題」カテゴリの有無を再評価する
+    if (state.mode) renderAreaChips(); // 「要再挑戦リスト」「正解問題」エリアの有無を再評価する
     validateStartButton();
 
     // 中間演出（リング・ノイズ・スキャンライン）を終え、「接続完了」を
@@ -2689,8 +2688,8 @@ async function loadAllData() {
     validateStartButton();
     updateDataStatusDetail();
 
-    // モード選択済みならカテゴリ一覧を更新する
-    if (state.mode) populateCategorySelect();
+    // モード選択済みならエリア一覧を更新する
+    if (state.mode) renderAreaChips();
   } catch (err) {
     statusText.textContent =
       `読み込みに失敗しました：${err.message}。ネット接続を確認して「再読み込み」を押してください。`;
@@ -2752,7 +2751,7 @@ function setupStartScreen() {
       btn.classList.add("selected");
       state.mode = btn.dataset.mode;
       playSelectSound();
-      populateCategorySelect();
+      renderAreaChips();
       validateStartButton();
     });
   });
@@ -2778,20 +2777,16 @@ function setupStartScreen() {
     });
   });
 
-  document.getElementById("category-select").addEventListener("change", (e) => {
-    state.category = e.target.value;
-    playSelectSound();
-  });
-
   document.getElementById("btn-recommend-start").addEventListener("click", () => {
     const category = document.getElementById("recommend-card").dataset.category;
     if (!category) return;
     playSelectSound();
-    document.querySelector('[data-mode="knowledge"]')?.click();
-    const categorySelect = document.getElementById("category-select");
-    if (Array.from(categorySelect.options).some((opt) => opt.value === category)) {
-      categorySelect.value = category;
-      state.category = category;
+    document.querySelector('[data-mode="knowledge"]')?.click(); // renderAreaChips()がここで走る
+    const chip = document.querySelector(`#category-chip-container .area-chip[data-value="${CSS.escape(category)}"]`);
+    if (chip) {
+      document.querySelectorAll("#category-chip-container .area-chip").forEach((b) => b.classList.remove("selected"));
+      chip.classList.add("selected");
+      state.categories = new Set([category]);
     }
     document.querySelector('[data-level="初級"]')?.click();
     document.querySelector('[data-count="5"]')?.click();
@@ -3417,14 +3412,20 @@ async function renderRankingScreen() {
   }
 }
 
-// カテゴリ一覧は「実際に生成された問題」から動的に作る。
+// エリア一覧は「実際に生成された問題」から動的に作る。
 // 将来スプレッドシートに新ジャンルのシートを追加しても、
-// 問題さえ生成されればカテゴリが自動的に選択肢に現れます。
+// 問題さえ生成されればエリアが自動的にチップとして現れます。
 // 「不正解問題」「正解問題」は、現在のユーザーの不正解/正解済みリストに
-// 該当モードの問題が1問でもある場合だけ選択肢に追加する（無ければ出さない）。
-function populateCategorySelect() {
-  const select = document.getElementById("category-select");
-  select.innerHTML = "";
+// 該当モードの問題が1問でもある場合だけチップとして追加する（無ければ出さない）。
+//
+// 1章〜8章の座学系エリアは章ごとの見出しでグルーピングせず、フラットな
+// チップとして横並びに表示する（「入門」「1章 太陽光発電」も同列）。
+// 製品ベースのエリア（保証・容量・停電対策など）だけ「製品問題」の
+// 見出しでまとめる。複数エリアを同時選択可能（トグル式チップ）。
+function renderAreaChips() {
+  const container = document.getElementById("category-chip-container");
+  container.innerHTML = "";
+  state.categories = new Set();
 
   let pool;
   if (state.mode === "knowledge") pool = knowledgeQuestions;
@@ -3441,29 +3442,75 @@ function populateCategorySelect() {
   const wrongCountInPool = pool.filter((q) => wrongIds.includes(q.id)).length;
   const correctCountInPool = pool.filter((q) => correctIds.includes(q.id)).length;
 
-  const addOption = (parent, value, label) => {
-    const opt = document.createElement("option");
-    opt.value = value;
-    opt.textContent = label;
-    parent.appendChild(opt);
-  };
+  const allChip = makeAreaChip("全エリア", "全エリア", "area-chip-all selected");
 
-  addOption(select, "全エリア", "全エリア");
-  if (wrongCountInPool > 0) addOption(select, WRONG_CATEGORY, `要再挑戦リスト（${wrongCountInPool}問）`);
-  if (correctCountInPool > 0) addOption(select, CORRECT_CATEGORY, `正解問題（${correctCountInPool}問）`);
+  const topGrid = document.createElement("div");
+  topGrid.className = "area-chip-grid";
+  topGrid.appendChild(allChip);
+  if (wrongCountInPool > 0) topGrid.appendChild(makeAreaChip(WRONG_CATEGORY, `要再挑戦リスト（${wrongCountInPool}問）`));
+  if (correctCountInPool > 0) topGrid.appendChild(makeAreaChip(CORRECT_CATEGORY, `正解問題（${correctCountInPool}問）`));
+  container.appendChild(topGrid);
 
-  // ジャンル（1章 基礎知識／2章 システム設計・発電量計算／製品問題）ごとに
-  // optgroupでまとめて表示する。章に属するカテゴリは表示名にも章番号を付ける
-  GENRE_ORDER.forEach((genre) => {
-    const catsInGenre = ordered.filter((c) => genreOfCategory(c) === genre);
-    if (catsInGenre.length === 0) return;
-    const group = document.createElement("optgroup");
-    group.label = genre;
-    catsInGenre.forEach((cat) => addOption(group, cat, categoryDisplayLabel(cat)));
-    select.appendChild(group);
-  });
+  const flatGrid = document.createElement("div");
+  flatGrid.className = "area-chip-grid";
+  ordered
+    .filter((cat) => genreOfCategory(cat) !== "製品問題")
+    .forEach((cat) => flatGrid.appendChild(makeAreaChip(cat, categoryDisplayLabel(cat))));
+  if (flatGrid.children.length > 0) container.appendChild(flatGrid);
 
-  state.category = "全エリア";
+  const productCats = ordered.filter((cat) => genreOfCategory(cat) === "製品問題");
+  if (productCats.length > 0) {
+    const label = document.createElement("p");
+    label.className = "area-chip-section-label";
+    label.textContent = "製品問題";
+    container.appendChild(label);
+    const productGrid = document.createElement("div");
+    productGrid.className = "area-chip-grid";
+    productCats.forEach((cat) => productGrid.appendChild(makeAreaChip(cat, cat)));
+    container.appendChild(productGrid);
+  }
+}
+
+// エリアチップ1個を生成する（クリックでトグル選択。「全エリア」は他の選択を全解除する特別扱い）
+function makeAreaChip(value, label, extraClass) {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = extraClass ? `area-chip ${extraClass}` : "area-chip";
+  btn.textContent = label;
+  btn.dataset.value = value;
+  btn.addEventListener("click", () => toggleAreaChip(value, btn));
+  return btn;
+}
+
+function toggleAreaChip(value, btnEl) {
+  playSelectSound();
+  const container = document.getElementById("category-chip-container");
+  const allBtn = container.querySelector(".area-chip-all");
+
+  if (value === "全エリア") {
+    state.categories.clear();
+    container.querySelectorAll(".area-chip").forEach((b) => b.classList.remove("selected"));
+    allBtn.classList.add("selected");
+    return;
+  }
+
+  allBtn.classList.remove("selected");
+  if (state.categories.has(value)) {
+    state.categories.delete(value);
+    btnEl.classList.remove("selected");
+  } else {
+    state.categories.add(value);
+    btnEl.classList.add("selected");
+  }
+  if (state.categories.size === 0) {
+    allBtn.classList.add("selected");
+  }
+}
+
+// PLAYER LOGへの記録・セッション表示用に、選択中エリアを1つの文字列にまとめる
+function categoryLabelForLog(categories) {
+  if (!categories || categories.size === 0) return "全エリア";
+  return Array.from(categories).join("、");
 }
 
 function validateStartButton() {
@@ -3473,7 +3520,7 @@ function validateStartButton() {
 
 // ---- 出題プールを組み立ててセッションを開始する ----
 async function beginQuizSession() {
-  const pool = buildFilteredPool(state.mode, state.category, state.level);
+  const pool = buildFilteredPool(state.mode, state.categories, state.level);
 
   if (pool.length === 0) {
     document.getElementById("start-warning").textContent =
@@ -3487,14 +3534,14 @@ async function beginQuizSession() {
   state.sessionQuestions = pickSessionQuestions(pool, n, state.mode);
   state.currentIndex = 0;
   state.userAnswers = [];
-  state.isReviewSession = state.category === WRONG_CATEGORY || state.category === CORRECT_CATEGORY;
+  state.isReviewSession = state.categories.has(WRONG_CATEGORY) || state.categories.has(CORRECT_CATEGORY);
   state.exitedEarly = false;
   newStreakRecordThisSession = false;
   resetSessionExpTracking();
 
   // PLAYER LOG用のセッション行を作る（各回答のsession_idに使うため開始を待つ）
   state.currentSessionId = currentUserRecord
-    ? await startPlayerLogSession(currentUserRecord.id, state.mode, state.category, state.level, state.countOption)
+    ? await startPlayerLogSession(currentUserRecord.id, state.mode, categoryLabelForLog(state.categories), state.level, state.countOption)
     : null;
 
   showScreen("screen-quiz");
@@ -3533,20 +3580,25 @@ function resetSessionExpTracking() {
   state.tenQuestionBonusGranted = false;
 }
 
-function buildFilteredPool(mode, category, level) {
+// categoriesは選択中エリアのSet（複数可）。空Set＝「全エリア」で絞り込みなし。
+// 選択された各エリアに該当する問題の和集合（OR条件）を返す。
+function buildFilteredPool(mode, categories, level) {
   let pool;
   if (mode === "knowledge") pool = knowledgeQuestions;
   else if (mode === "practice") pool = practiceQuestions;
   else pool = knowledgeQuestions.concat(practiceQuestions);
 
-  if (category === WRONG_CATEGORY) {
+  if (categories && categories.size > 0) {
     const wrongIds = currentUserRecord ? currentUserRecord.wrongQuestionIds : [];
-    pool = pool.filter((q) => wrongIds.includes(q.id));
-  } else if (category === CORRECT_CATEGORY) {
     const correctIds = currentUserRecord ? currentUserRecord.correctQuestionIds : [];
-    pool = pool.filter((q) => correctIds.includes(q.id));
-  } else if (category && category !== "全エリア") {
-    pool = pool.filter((q) => q.category === category);
+    pool = pool.filter((q) => {
+      for (const cat of categories) {
+        if (cat === WRONG_CATEGORY) { if (wrongIds.includes(q.id)) return true; }
+        else if (cat === CORRECT_CATEGORY) { if (correctIds.includes(q.id)) return true; }
+        else if (q.category === cat) return true;
+      }
+      return false;
+    });
   }
 
   if (level && level !== "全レベル") {
@@ -4084,13 +4136,16 @@ function startReviewSession() {
 // ---- 最初からやり直す（ユーザーはログインしたまま） ----
 function resetToStart() {
   state.mode = null;
-  state.category = "全エリア";
+  state.categories = new Set();
   state.level = "全レベル";
   state.countOption = null;
   state.sessionQuestions = [];
   state.currentIndex = 0;
   state.userAnswers = [];
   state.isReviewSession = false;
+
+  const chipContainer = document.getElementById("category-chip-container");
+  if (chipContainer) chipContainer.innerHTML = "";
 
   document.querySelectorAll("#mode-select .option-btn, #count-select .option-btn, #level-select .option-btn").forEach((b) =>
     b.classList.remove("selected")
