@@ -677,6 +677,14 @@ const CATEGORY_GENRE = {
 function genreOfCategory(cat) {
   return CATEGORY_GENRE[cat] || "製品問題";
 }
+// エリア選択の表示名：所属ジャンルが「N章 ...」であれば、そのカテゴリ名にも
+// 同じ「N章」を頭に付けて表示する（例：「基礎知識」→「1章 基礎知識」）。
+// 製品問題ジャンルのカテゴリは章番号を付けずそのまま表示する。
+function categoryDisplayLabel(cat) {
+  const genre = genreOfCategory(cat);
+  const m = genre.match(/^(\d+章)/);
+  return m ? `${m[1]} ${cat}` : cat;
+}
 
 // 「不正解問題」「正解問題」はカテゴリ一覧の中に混ぜて選べるようにする特別な
 // 擬似カテゴリ。実際のカテゴリタグではなく、現在のユーザーの不正解/正解済み
@@ -3432,13 +3440,14 @@ function populateCategorySelect() {
   if (wrongCountInPool > 0) addOption(select, WRONG_CATEGORY, `要再挑戦リスト（${wrongCountInPool}問）`);
   if (correctCountInPool > 0) addOption(select, CORRECT_CATEGORY, `正解問題（${correctCountInPool}問）`);
 
-  // 「1章 基礎知識」「製品問題」のジャンルごとにoptgroupでまとめて表示する
+  // ジャンル（1章 基礎知識／2章 システム設計・発電量計算／製品問題）ごとに
+  // optgroupでまとめて表示する。章に属するカテゴリは表示名にも章番号を付ける
   GENRE_ORDER.forEach((genre) => {
     const catsInGenre = ordered.filter((c) => genreOfCategory(c) === genre);
     if (catsInGenre.length === 0) return;
     const group = document.createElement("optgroup");
     group.label = genre;
-    catsInGenre.forEach((cat) => addOption(group, cat, cat));
+    catsInGenre.forEach((cat) => addOption(group, cat, categoryDisplayLabel(cat)));
     select.appendChild(group);
   });
 
