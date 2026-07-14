@@ -1638,11 +1638,6 @@ function setupUserScreen() {
     if (e.key === "Enter") startAsUser(nameInput.value, pinInput.value);
   });
 
-  document.getElementById("btn-switch-user").addEventListener("click", () => {
-    pinInput.value = "";
-    document.getElementById("username-warning").textContent = "";
-    showScreen("screen-user");
-  });
 }
 
 // 入力されたユーザー名＋PINでログインし（未登録ならそのPINで新規登録）、
@@ -2443,6 +2438,7 @@ function setupStartScreen() {
   document.getElementById("btn-review-wrong").addEventListener("click", startReviewSession);
 
   document.getElementById("btn-show-ranking").addEventListener("click", () => {
+    playSelectSound();
     showScreen("screen-ranking");
     renderRankingScreen();
   });
@@ -2487,7 +2483,10 @@ function plTodayKey() {
 }
 
 function setupPlayerLog() {
-  document.getElementById("btn-show-player-log").addEventListener("click", openPlayerLog);
+  document.getElementById("btn-show-player-log").addEventListener("click", () => {
+    playSelectSound();
+    openPlayerLog();
+  });
   document.getElementById("btn-open-player-log").addEventListener("click", openPlayerLog);
   document.getElementById("btn-player-log-back-top").addEventListener("click", () => showScreen("screen-start"));
 

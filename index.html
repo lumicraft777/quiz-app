@@ -9,7 +9,7 @@
 <!-- style.css / script.js を編集したら ?v= の数字を必ず増やすこと。
      増やさないと、ブラウザにキャッシュされた古いファイルが
      読み込まれ続け、コード修正がユーザーの端末に反映されないため。 -->
-<link rel="stylesheet" href="style.css?v=31">
+<link rel="stylesheet" href="style.css?v=32">
 </head>
 <body>
 
@@ -289,11 +289,18 @@
 
     <div class="user-bar">
       <span id="current-user-label" class="current-user-label"></span>
-      <span class="user-bar-links">
-        <button type="button" id="btn-show-ranking" class="link-btn">攻略者ボードを見る</button>
-        <button type="button" id="btn-show-player-log" class="link-btn">PLAYER LOG</button>
-        <button type="button" id="btn-switch-user" class="link-btn">プレイヤーを切り替える</button>
-      </span>
+    </div>
+
+    <!-- 攻略者ボード／PLAYER LOGへの導線。押したくなるよう発光カードにする -->
+    <div class="nav-action-grid">
+      <button type="button" id="btn-show-ranking" class="nav-action-btn nav-action-btn-ranking">
+        <span class="nav-action-icon">🏆</span>
+        <span class="nav-action-label">攻略者ボード</span>
+      </button>
+      <button type="button" id="btn-show-player-log" class="nav-action-btn nav-action-btn-log">
+        <span class="nav-action-icon">📊</span>
+        <span class="nav-action-label">PLAYER LOG</span>
+      </button>
     </div>
 
     <!-- 連続ログイン（学習ストリーク）表示 -->
@@ -703,6 +710,6 @@
 
 </div>
 
-<script src="script.js?v=34"></script>
+<script src="script.js?v=35"></script>
 </body>
 </html>
