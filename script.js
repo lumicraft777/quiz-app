@@ -416,16 +416,22 @@ function renderBadges(badges) {
   grid.innerHTML = "";
 
   const unlocked = badges.filter((b) => b.unlocked);
-  titleText.textContent = unlocked.length > 0
-    ? `解放済み：${unlocked.length} / ${badges.length}`
-    : `まだ称号がありません。任務を攻略して解放しよう`;
+  const equippedKey = currentUserRecord ? currentUserRecord.equippedBadgeKey : null;
+  if (unlocked.length === 0) {
+    titleText.textContent = "まだ称号がありません。任務を攻略して解放しよう";
+  } else {
+    titleText.textContent = equippedKey
+      ? `装備中の称号：${currentUserRecord.equippedBadgeTitle}（タップで解除／変更できます）`
+      : `解放済み：${unlocked.length} / ${badges.length}（タップして攻略者ボードに表示する称号を選ぼう）`;
+  }
 
   badges.forEach((b) => {
     const item = document.createElement("div");
-    item.className = "badge-item" + (b.unlocked ? " unlocked" : " locked");
+    const isEquipped = b.unlocked && b.key === equippedKey;
+    item.className = "badge-item" + (b.unlocked ? " unlocked" : " locked") + (isEquipped ? " equipped" : "");
     const icon = document.createElement("span");
     icon.className = "badge-item-icon";
-    icon.textContent = b.unlocked ? "🎖️" : "🔒";
+    icon.textContent = b.unlocked ? (isEquipped ? "⭐" : "🎖️") : "🔒";
     const title = document.createElement("span");
     title.className = "badge-item-title";
     title.textContent = b.title;
@@ -435,10 +441,36 @@ function renderBadges(badges) {
     item.appendChild(icon);
     item.appendChild(title);
     item.appendChild(desc);
+    if (b.unlocked) {
+      item.classList.add("tappable");
+      item.setAttribute("role", "button");
+      item.setAttribute("tabindex", "0");
+      item.addEventListener("click", () => toggleEquipBadge(b.key, isEquipped));
+    }
     grid.appendChild(item);
   });
 
   card.hidden = badges.length === 0;
+}
+
+// 称号の装備／解除を切り替える（既に装備中のものをタップしたら解除する）
+async function toggleEquipBadge(badgeKey, isCurrentlyEquipped) {
+  if (!currentUserRecord) return;
+  playSelectSound();
+  const nextKey = isCurrentlyEquipped ? null : badgeKey;
+  try {
+    const rows = await supabaseRpc("rpc_set_equipped_badge", {
+      p_user_id: currentUserRecord.id,
+      p_badge_key: nextKey
+    });
+    const row = rows[0];
+    currentUserRecord.equippedBadgeKey = row.equipped_badge_key || null;
+    currentUserRecord.equippedBadgeTitle = row.equipped_badge_title || null;
+    const badges = await fetchBadges(currentUserRecord.id);
+    renderBadges(badges);
+  } catch (err) {
+    console.error("称号の装備に失敗しました:", err.message);
+  }
 }
 
 // onClosed：閉じるボタンが押された後（フェードアウト完了後）に呼ばれるコールバック
@@ -812,6 +844,8 @@ async function loginUser(username, pin) {
     diagnosticLevel: row.diagnostic_level || "",
     diagnosticGrowth: row.diagnostic_growth || [],
     diagnosticStrengths: row.diagnostic_strengths || [],
+    equippedBadgeKey: row.equipped_badge_key || null,
+    equippedBadgeTitle: row.equipped_badge_title || null,
     wrongQuestionIds: statusRows.filter((r) => !r.correct).map((r) => r.question_id),
     correctQuestionIds: statusRows.filter((r) => r.correct).map((r) => r.question_id)
   };
@@ -861,6 +895,8 @@ async function registerPlayer(s) {
     diagnosticLevel: row.diagnostic_level || "",
     diagnosticGrowth: row.diagnostic_growth || [],
     diagnosticStrengths: row.diagnostic_strengths || [],
+    equippedBadgeKey: row.equipped_badge_key || null,
+    equippedBadgeTitle: row.equipped_badge_title || null,
     wrongQuestionIds: [],
     correctQuestionIds: []
   };
@@ -3389,6 +3425,12 @@ async function renderRankingScreen() {
       const name = document.createElement("span");
       name.className = "ranking-name";
       name.textContent = row.username;
+      if (row.equipped_badge_title) {
+        const titleTag = document.createElement("span");
+        titleTag.className = "ranking-title-tag";
+        titleTag.textContent = row.equipped_badge_title;
+        name.appendChild(titleTag);
+      }
 
       const { headline, detail } = buildRankingStatsLines(currentRankingType, row);
       const stats = document.createElement("span");
@@ -4178,6 +4220,10 @@ function showScreen(id) {
   // （端末のオーバースクロール／ラバーバンドで背景の白が見えるのを防ぐ）
   document.documentElement.classList.toggle("dive-active", id === "screen-user");
   document.body.classList.toggle("dive-active", id === "screen-user");
+
+  // ログイン画面・初回登録儀式の間は没入感を優先し、ワールド辞典アイコンを隠す
+  const dictToggle = document.getElementById("btn-dictionary-toggle");
+  if (dictToggle) dictToggle.hidden = (id === "screen-user" || id === "screen-onboarding");
 }
 
 // ---- アプリ起動 ----

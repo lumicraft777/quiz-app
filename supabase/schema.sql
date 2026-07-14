@@ -81,6 +81,10 @@ create table if not exists users (
   created_at timestamptz not null default now()
 );
 
+-- 装備中の称号（badgesテーブルはこの後で定義されるため、ここではFK制約は付けない。
+-- 実際に装備できるかどうかはrpc_set_equipped_badge側でuser_badgesを見て検証する）
+alter table users add column if not exists equipped_badge_key text;
+
 -- ================================================================
 -- answer_history: 回答履歴。不正解/正解済みリストもここから導出する
 -- （「各問題ごとの最新の回答結果」＝現在の得意/不得意を表す）
@@ -223,7 +227,8 @@ returns table (
   today_best_score int, today_best_rate int,
   onboarding_completed boolean, goal_reason text,
   goal_tags text[], contract_goal text, first_area text,
-  diagnostic_level text, diagnostic_growth text[], diagnostic_strengths text[]
+  diagnostic_level text, diagnostic_growth text[], diagnostic_strengths text[],
+  equipped_badge_key text, equipped_badge_title text
 )
 language plpgsql
 security definer
@@ -231,6 +236,7 @@ as $$
 declare
   v_user users;
   v_today date := current_date;
+  v_badge_title text;
 begin
   if length(p_pin) < 4 then
     raise exception 'PINは4桁以上で入力してください';
@@ -268,6 +274,8 @@ begin
     today_best_date = v_user.today_best_date
   where u.id = v_user.id;
 
+  select b.title into v_badge_title from badges b where b.key = v_user.equipped_badge_key;
+
   return query
     select v_user.id, v_user.username, v_user.best_score, v_user.best_rate,
            v_user.current_streak, v_user.best_streak, v_user.total_answered, v_user.total_correct,
@@ -275,7 +283,8 @@ begin
            v_user.today_best_score, v_user.today_best_rate,
            v_user.onboarding_completed, v_user.goal_reason,
            v_user.goal_tags, v_user.contract_goal, v_user.first_area,
-           v_user.diagnostic_level, v_user.diagnostic_growth, v_user.diagnostic_strengths;
+           v_user.diagnostic_level, v_user.diagnostic_growth, v_user.diagnostic_strengths,
+           v_user.equipped_badge_key, v_badge_title;
 end;
 $$;
 
@@ -294,6 +303,7 @@ $$;
 --   1回だけ呼ぶ。アカウント作成・儀式で集めた回答・現在地チェックの
 --   診断結果・診断の個別回答を、すべて1つのトランザクションで保存する）
 -- ================================================================
+drop function if exists rpc_register_player(text, text, text[], text, text, int, text, text, boolean, int, text, text[], text[], jsonb);
 create or replace function rpc_register_player(
   p_username text, p_pin text,
   p_goal_tags text[], p_goal_reason text, p_commitment_cadence text, p_resolve_percent int,
@@ -309,7 +319,8 @@ returns table (
   today_best_score int, today_best_rate int,
   onboarding_completed boolean, goal_reason text,
   goal_tags text[], contract_goal text, first_area text,
-  diagnostic_level text, diagnostic_growth text[], diagnostic_strengths text[]
+  diagnostic_level text, diagnostic_growth text[], diagnostic_strengths text[],
+  equipped_badge_key text, equipped_badge_title text
 )
 language plpgsql
 security definer
@@ -352,7 +363,8 @@ begin
            v_user.today_best_score, v_user.today_best_rate,
            v_user.onboarding_completed, v_user.goal_reason,
            v_user.goal_tags, v_user.contract_goal, v_user.first_area,
-           v_user.diagnostic_level, v_user.diagnostic_growth, v_user.diagnostic_strengths;
+           v_user.diagnostic_level, v_user.diagnostic_growth, v_user.diagnostic_strengths,
+           v_user.equipped_badge_key, null::text;
 end;
 $$;
 
@@ -720,15 +732,16 @@ create or replace function rpc_get_ranking()
 returns table (
   username text, best_score int, best_rate int,
   total_answered int, total_correct int, current_streak int, best_streak int,
-  level int, total_exp int
+  level int, total_exp int, equipped_badge_title text
 )
 language sql
 security definer
 as $$
-  select username, best_score, best_rate, total_answered, total_correct, current_streak, best_streak,
-         level, total_exp
-  from users
-  order by best_rate desc, best_score desc
+  select u.username, u.best_score, u.best_rate, u.total_answered, u.total_correct, u.current_streak, u.best_streak,
+         u.level, u.total_exp, b.title
+  from users u
+  left join badges b on b.key = u.equipped_badge_key
+  order by u.best_rate desc, u.best_score desc
   limit 100;
 $$;
 
@@ -929,6 +942,29 @@ begin
 end;
 $$;
 
+-- 称号を装備する（nullを渡せば解除）。未解放の称号は装備できないようサーバー側で検証する
+create or replace function rpc_set_equipped_badge(p_user_id uuid, p_badge_key text)
+returns table (equipped_badge_key text, equipped_badge_title text)
+language plpgsql
+security definer
+as $$
+begin
+  if p_badge_key is not null and not exists (
+    select 1 from user_badges ub where ub.user_id = p_user_id and ub.badge_key = p_badge_key
+  ) then
+    raise exception 'この称号はまだ解放されていません';
+  end if;
+
+  update users u set equipped_badge_key = p_badge_key where u.id = p_user_id;
+
+  return query
+    select u.equipped_badge_key, b.title
+    from users u
+    left join badges b on b.key = u.equipped_badge_key
+    where u.id = p_user_id;
+end;
+$$;
+
 -- ================================================================
 -- デイリーミッションRPC
 -- ================================================================
@@ -1031,96 +1067,110 @@ $$;
 -- ================================================================
 -- 「毎日触れているか」を可視化するための継続日数ランキング。
 -- streak_daysが同じ場合は直近ログインの新しい順にする
+drop function if exists rpc_get_streak_ranking();
 create or replace function rpc_get_streak_ranking()
-returns table (username text, streak_days int, last_active_date date, level int, total_exp int)
+returns table (username text, streak_days int, last_active_date date, level int, total_exp int, equipped_badge_title text)
 language sql
 security definer
 as $$
-  select username, streak_days, last_active_date, level, total_exp
-  from users
-  where streak_days > 0
-  order by streak_days desc, last_active_date desc nulls last
+  select u.username, u.streak_days, u.last_active_date, u.level, u.total_exp, b.title
+  from users u
+  left join badges b on b.key = u.equipped_badge_key
+  where u.streak_days > 0
+  order by u.streak_days desc, u.last_active_date desc nulls last
   limit 100;
 $$;
 
+drop function if exists rpc_get_weekly_ranking();
 create or replace function rpc_get_weekly_ranking()
-returns table (username text, weekly_correct int, weekly_answered int, level int, total_exp int)
+returns table (username text, weekly_correct int, weekly_answered int, level int, total_exp int, equipped_badge_title text)
 language sql
 security definer
 as $$
   select u.username,
          count(*) filter (where ah.correct)::int as weekly_correct,
          count(*)::int as weekly_answered,
-         u.level, u.total_exp
+         u.level, u.total_exp, b.title
   from answer_history ah
   join users u on u.id = ah.user_id
+  left join badges b on b.key = u.equipped_badge_key
   where ah.answered_at >= now() - interval '7 days'
-  group by u.id, u.username, u.level, u.total_exp
+  group by u.id, u.username, u.level, u.total_exp, b.title
   order by weekly_correct desc, weekly_answered desc
   limit 100;
 $$;
 
+drop function if exists rpc_get_monthly_ranking();
 create or replace function rpc_get_monthly_ranking()
-returns table (username text, monthly_correct int, monthly_answered int, level int, total_exp int)
+returns table (username text, monthly_correct int, monthly_answered int, level int, total_exp int, equipped_badge_title text)
 language sql
 security definer
 as $$
   select u.username,
          count(*) filter (where ah.correct)::int as monthly_correct,
          count(*)::int as monthly_answered,
-         u.level, u.total_exp
+         u.level, u.total_exp, b.title
   from answer_history ah
   join users u on u.id = ah.user_id
+  left join badges b on b.key = u.equipped_badge_key
   where ah.answered_at >= now() - interval '30 days'
-  group by u.id, u.username, u.level, u.total_exp
+  group by u.id, u.username, u.level, u.total_exp, b.title
   order by monthly_correct desc, monthly_answered desc
   limit 100;
 $$;
 
+drop function if exists rpc_get_combo_ranking();
 create or replace function rpc_get_combo_ranking()
-returns table (username text, best_streak int, level int, total_exp int)
+returns table (username text, best_streak int, level int, total_exp int, equipped_badge_title text)
 language sql
 security definer
 as $$
-  select username, best_streak, level, total_exp
-  from users
-  where best_streak > 0
-  order by best_streak desc
+  select u.username, u.best_streak, u.level, u.total_exp, b.title
+  from users u
+  left join badges b on b.key = u.equipped_badge_key
+  where u.best_streak > 0
+  order by u.best_streak desc
   limit 100;
 $$;
 
+drop function if exists rpc_get_suppression_ranking();
 create or replace function rpc_get_suppression_ranking()
-returns table (username text, best_rate int, level int, total_exp int)
+returns table (username text, best_rate int, level int, total_exp int, equipped_badge_title text)
 language sql
 security definer
 as $$
-  select username, best_rate, level, total_exp
-  from users
-  where total_answered > 0
-  order by best_rate desc, username asc
+  select u.username, u.best_rate, u.level, u.total_exp, b.title
+  from users u
+  left join badges b on b.key = u.equipped_badge_key
+  where u.total_answered > 0
+  order by u.best_rate desc, u.username asc
   limit 100;
 $$;
 
+drop function if exists rpc_get_mission_count_ranking();
 create or replace function rpc_get_mission_count_ranking()
-returns table (username text, total_answered int, level int, total_exp int)
+returns table (username text, total_answered int, level int, total_exp int, equipped_badge_title text)
 language sql
 security definer
 as $$
-  select username, total_answered, level, total_exp
-  from users
-  where total_answered > 0
-  order by total_answered desc
+  select u.username, u.total_answered, u.level, u.total_exp, b.title
+  from users u
+  left join badges b on b.key = u.equipped_badge_key
+  where u.total_answered > 0
+  order by u.total_answered desc
   limit 100;
 $$;
 
+drop function if exists rpc_get_review_ranking();
 create or replace function rpc_get_review_ranking()
-returns table (username text, review_correct_count int, level int, total_exp int)
+returns table (username text, review_correct_count int, level int, total_exp int, equipped_badge_title text)
 language sql
 security definer
 as $$
-  select username, review_correct_count, level, total_exp
-  from users
-  where review_correct_count > 0
-  order by review_correct_count desc
+  select u.username, u.review_correct_count, u.level, u.total_exp, b.title
+  from users u
+  left join badges b on b.key = u.equipped_badge_key
+  where u.review_correct_count > 0
+  order by u.review_correct_count desc
   limit 100;
 $$;
