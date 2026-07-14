@@ -39,6 +39,7 @@ const {
   generateEquipmentQuestions,
   generateConstructionQuestions,
   generateGridPolicyQuestions,
+  generateLawQuestions,
   isUnknownValue
 } = require("../question-generator.js");
 
@@ -151,6 +152,11 @@ async function main() {
   const gridPolicyQuestions = generateGridPolicyQuestions();
   console.log(`  [系統連系と電力制度] ${gridPolicyQuestions.length}問を生成`);
   knowledgeQuestions = knowledgeQuestions.concat(gridPolicyQuestions);
+
+  // 第6章 関係法規（製品データに依存しない静的問題）
+  const lawQuestions = generateLawQuestions();
+  console.log(`  [関係法規] ${lawQuestions.length}問を生成`);
+  knowledgeQuestions = knowledgeQuestions.concat(lawQuestions);
 
   for (const conf of SHEET_CONFIG) {
     const products = await loadProductsFromSheet(conf);
