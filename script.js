@@ -664,6 +664,19 @@ const CATEGORY_ORDER = [
   "電気代削減", "初期費用", "EV/V2H", "保証・安心", "設置スペース", "営業トーク判断"
 ];
 
+// エリア選択プルダウンをグループ化するためのジャンル分け。
+// 製品データに依存しない座学系カテゴリは「1章 基礎知識」、
+// 具体的な製品（型番・スペック・営業トーク等）に関するカテゴリは「製品問題」。
+// ここに載っていないカテゴリ（将来の新カテゴリ）は「製品問題」扱いにする。
+const GENRE_ORDER = ["1章 基礎知識", "製品問題"];
+const CATEGORY_GENRE = {
+  "基礎知識": "1章 基礎知識",
+  "太陽光発電": "1章 基礎知識"
+};
+function genreOfCategory(cat) {
+  return CATEGORY_GENRE[cat] || "製品問題";
+}
+
 // 「不正解問題」「正解問題」はカテゴリ一覧の中に混ぜて選べるようにする特別な
 // 擬似カテゴリ。実際のカテゴリタグではなく、現在のユーザーの不正解/正解済み
 // リストへのID一致で絞り込む。
@@ -3402,25 +3415,32 @@ function populateCategorySelect() {
   // 表示順リストにないカテゴリ（将来の新ジャンル）も末尾に追加する
   present.forEach((c) => { if (!ordered.includes(c)) ordered.push(c); });
 
-  const options = ["全エリア"];
-
   const wrongIds = currentUserRecord ? currentUserRecord.wrongQuestionIds : [];
   const correctIds = currentUserRecord ? currentUserRecord.correctQuestionIds : [];
   const wrongCountInPool = pool.filter((q) => wrongIds.includes(q.id)).length;
   const correctCountInPool = pool.filter((q) => correctIds.includes(q.id)).length;
-  if (wrongCountInPool > 0) options.push(WRONG_CATEGORY);
-  if (correctCountInPool > 0) options.push(CORRECT_CATEGORY);
 
-  options.push(...ordered);
-
-  options.forEach((cat) => {
+  const addOption = (parent, value, label) => {
     const opt = document.createElement("option");
-    opt.value = cat;
-    if (cat === WRONG_CATEGORY) opt.textContent = `要再挑戦リスト（${wrongCountInPool}問）`;
-    else if (cat === CORRECT_CATEGORY) opt.textContent = `正解問題（${correctCountInPool}問）`;
-    else opt.textContent = cat;
-    select.appendChild(opt);
+    opt.value = value;
+    opt.textContent = label;
+    parent.appendChild(opt);
+  };
+
+  addOption(select, "全エリア", "全エリア");
+  if (wrongCountInPool > 0) addOption(select, WRONG_CATEGORY, `要再挑戦リスト（${wrongCountInPool}問）`);
+  if (correctCountInPool > 0) addOption(select, CORRECT_CATEGORY, `正解問題（${correctCountInPool}問）`);
+
+  // 「1章 基礎知識」「製品問題」のジャンルごとにoptgroupでまとめて表示する
+  GENRE_ORDER.forEach((genre) => {
+    const catsInGenre = ordered.filter((c) => genreOfCategory(c) === genre);
+    if (catsInGenre.length === 0) return;
+    const group = document.createElement("optgroup");
+    group.label = genre;
+    catsInGenre.forEach((cat) => addOption(group, cat, cat));
+    select.appendChild(group);
   });
+
   state.category = "全エリア";
 }
 
