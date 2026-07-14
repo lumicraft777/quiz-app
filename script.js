@@ -677,10 +677,16 @@ const CATEGORY_GENRE = {
 function genreOfCategory(cat) {
   return CATEGORY_GENRE[cat] || "製品問題";
 }
-// エリア選択の表示名：所属ジャンルが「N章 ...」であれば、そのカテゴリ名にも
-// 同じ「N章」を頭に付けて表示する（例：「基礎知識」→「1章 基礎知識」）。
+// エリア選択の表示名：個別に上書き指定がある場合はそれを使う
+// （例：「基礎知識」は入門レベルの内容であることが分かるよう「入門レベル」と表示）。
+// それ以外は、所属ジャンルが「N章 ...」であればカテゴリ名の頭に同じ「N章」を
+// 付けて表示する（例：「太陽光発電」→「1章 太陽光発電」）。
 // 製品問題ジャンルのカテゴリは章番号を付けずそのまま表示する。
+const CATEGORY_DISPLAY_OVERRIDE = {
+  "基礎知識": "入門レベル"
+};
 function categoryDisplayLabel(cat) {
+  if (CATEGORY_DISPLAY_OVERRIDE[cat]) return CATEGORY_DISPLAY_OVERRIDE[cat];
   const genre = genreOfCategory(cat);
   const m = genre.match(/^(\d+章)/);
   return m ? `${m[1]} ${cat}` : cat;
