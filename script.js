@@ -521,6 +521,109 @@ function showBadgeUnlockQueue(badges) {
   showNext();
 }
 
+/* ================================================================
+   ランキング確定結果の発表
+   ----------------------------------------------------------------
+   前日・先週・先月の解答数ランキングが「確定」した後の初回ログインで、
+   自分の最終順位を演出付きで発表する。表示済みかどうかは
+   localStorage（ユーザーID×期間×期間キー）で管理し、同じ結果は
+   二度表示しない。順位はサーバー側でanswer_historyから都度計算される
+   ため、過去分はいつ問い合わせても同じ値に確定している。
+   ================================================================ */
+
+const RANK_RESULT_SHOWN_PREFIX = "batteryQuiz_rankResultShown_";
+
+const RANK_PERIOD_LABELS = {
+  daily: "デイリーランキング",
+  weekly: "ウィークリーランキング",
+  monthly: "マンスリーランキング"
+};
+const RANK_PERIOD_INTRO = {
+  daily: "前日の戦績が確定しました",
+  weekly: "先週の戦績が確定しました",
+  monthly: "先月の戦績が確定しました"
+};
+
+// 順位→見た目の階級（1位=金、2位=銀、3位=銅、4-5位=上位、それ以外=通常）
+function rankResultTier(rank) {
+  return rank === 1 ? "gold" : rank === 2 ? "silver" : rank === 3 ? "bronze" : rank <= 5 ? "top" : "normal";
+}
+function rankResultMedal(rank) {
+  return rank === 1 ? "🥇" : rank === 2 ? "🥈" : rank === 3 ? "🥉" : rank <= 5 ? "🎖️" : "📡";
+}
+function rankResultMessage(rank) {
+  if (rank === 1) return "頂点接続完了。この期間の仮想訓練空間を制圧した。";
+  if (rank === 2) return "頂点まであと一歩。次の期間で首位奪取を狙え。";
+  if (rank === 3) return "表彰台を確保。上位陣との差はわずかだ。";
+  if (rank <= 5) return "上位ランカーとして記録された。次はメダル圏内へ。";
+  return "戦績を記録した。挑戦を積み重ねた者だけが順位を上げていく。";
+}
+
+function fetchPreviousPeriodResults(userId) {
+  return supabaseRpc("rpc_get_previous_period_results", { p_user_id: userId });
+}
+function fetchDateRankingResults(userId, date) {
+  return supabaseRpc("rpc_get_date_ranking_results", { p_user_id: userId, p_date: date });
+}
+
+function rankResultShownKey(result) {
+  return `${RANK_RESULT_SHOWN_PREFIX}${currentUserRecord.id}_${result.period}_${result.period_key}`;
+}
+
+// 1件の確定結果をオーバーレイで発表する。閉じられたらresolveする
+function showRankResultOverlay(result) {
+  return new Promise((resolve) => {
+    const overlay = document.getElementById("rank-result-overlay");
+    const card = document.getElementById("rank-result-card");
+    if (!overlay || !card) { resolve(); return; }
+
+    const tier = rankResultTier(result.rank);
+    card.className = `levelup-card rank-result-card rank-result-${tier}`;
+    document.getElementById("rank-result-period").textContent =
+      `${RANK_PERIOD_LABELS[result.period] || result.period}｜${RANK_PERIOD_INTRO[result.period] || ""}`;
+    document.getElementById("rank-result-medal").textContent = rankResultMedal(result.rank);
+    document.getElementById("rank-result-rank").innerHTML =
+      `<span class="rank-result-rank-num">${result.rank}</span>位<span class="rank-result-participants">／${result.participants}人中</span>`;
+    document.getElementById("rank-result-stats").textContent =
+      `解答 ${result.answered_count}問 ／ 正解 ${result.correct_count}問`;
+    document.getElementById("rank-result-message").textContent = rankResultMessage(result.rank);
+
+    overlay.hidden = false;
+    void overlay.offsetWidth;
+    overlay.classList.add("show");
+    playLevelUpSound(result.rank <= 3);
+    if (result.rank <= 3) launchConfetti(60);
+
+    const closeBtn = document.getElementById("btn-rank-result-close");
+    const onClose = () => {
+      closeBtn.removeEventListener("click", onClose);
+      playSelectSound();
+      overlay.classList.remove("show");
+      setTimeout(() => { overlay.hidden = true; resolve(); }, 300);
+    };
+    closeBtn.addEventListener("click", onClose);
+  });
+}
+
+// ログイン直後に呼ぶ：未発表の確定結果を古い期間から順に1件ずつ発表する
+async function maybeShowPeriodRankResults() {
+  if (!currentUserRecord) return;
+  try {
+    const rows = await fetchPreviousPeriodResults(currentUserRecord.id);
+    // monthly → weekly → daily の順（スケールの大きい結果から発表する）
+    const order = { monthly: 0, weekly: 1, daily: 2 };
+    const unseen = rows
+      .filter((r) => !safeLocalStorageGet(rankResultShownKey(r)))
+      .sort((a, b) => (order[a.period] ?? 9) - (order[b.period] ?? 9));
+    for (const r of unseen) {
+      await showRankResultOverlay(r);
+      safeLocalStorageSet(rankResultShownKey(r), "1");
+    }
+  } catch (err) {
+    console.error("ランキング確定結果の取得に失敗しました:", err.message);
+  }
+}
+
 // ---- デイリーミッション表示 ----
 // 1件分のミッション行DOMを組み立てる（一覧全体用・達成済みのみの一覧用の両方で使う）
 // 本日の残り時間（23:59:59まで）を「HH:MM:SS」で返す。
@@ -1057,10 +1160,10 @@ function rankingParams() {
 const RANKING_FETCHERS = {
   overall: () => supabaseRpc("rpc_get_ranking", rankingParams()),
   streak: () => supabaseRpc("rpc_get_streak_ranking", rankingParams()),
+  daily: () => supabaseRpc("rpc_get_daily_ranking", rankingParams()),
   weekly: () => supabaseRpc("rpc_get_weekly_ranking", rankingParams()),
   monthly: () => supabaseRpc("rpc_get_monthly_ranking", rankingParams()),
   combo: () => supabaseRpc("rpc_get_combo_ranking", rankingParams()),
-  suppression: () => supabaseRpc("rpc_get_suppression_ranking", rankingParams()),
   missions: () => supabaseRpc("rpc_get_mission_count_ranking", rankingParams()),
   review: () => supabaseRpc("rpc_get_review_ranking", rankingParams())
 };
@@ -1823,15 +1926,19 @@ async function startAsUser(rawName, rawPin) {
     // 「目を開けたらメイン画面にいる」ような没入感で遷移する
     await playDiveRevealTransition("接続完了。任務端末を起動します。", "screen-start");
 
-    // ログイン時点で条件を満たしている称号を付与する
-    // （ゲームマスターのようにプレイヤー名だけで解放される称号は、
-    //   任務をプレイしなくてもログイン直後に演出付きで受け取れる）
-    checkAndGrantBadges(currentUserRecord.id).then((newBadges) => {
+    // ログイン直後の演出は「確定ランキングの結果発表 → 新規称号の解放」の順。
+    // 結果発表オーバーレイをすべて閉じ終えてから称号演出を出す
+    (async () => {
+      await maybeShowPeriodRankResults();
+      // ログイン時点で条件を満たしている称号を付与する
+      // （ゲームマスターのようにプレイヤー名だけで解放される称号は、
+      //   任務をプレイしなくてもログイン直後に演出付きで受け取れる）
+      const newBadges = await checkAndGrantBadges(currentUserRecord.id);
       if (newBadges.length > 0) {
-        setTimeout(() => showBadgeUnlockQueue(newBadges), 800);
+        setTimeout(() => showBadgeUnlockQueue(newBadges), 400);
         refreshHomeExtras();
       }
-    });
+    })().catch((err) => console.error("ログイン後の演出処理に失敗しました:", err.message));
   } catch (err) {
     connectingOverlay.classList.remove("show", "syncing");
     setTimeout(() => { connectingOverlay.hidden = true; }, 300);
@@ -3176,11 +3283,13 @@ async function loadPlayerLogDayDetail(dateKeyStr) {
   contentEl.hidden = true;
 
   try {
-    const [summary, categories, difficulties, sessions] = await Promise.all([
+    const [summary, categories, difficulties, sessions, rankResults] = await Promise.all([
       fetchPlayerLogDaySummary(currentUserRecord.id, dateKeyStr),
       fetchPlayerLogDayCategories(currentUserRecord.id, dateKeyStr),
       fetchPlayerLogDayDifficulties(currentUserRecord.id, dateKeyStr),
-      fetchPlayerLogDaySessions(currentUserRecord.id, dateKeyStr)
+      fetchPlayerLogDaySessions(currentUserRecord.id, dateKeyStr),
+      // その日のランキング実績（デイリー毎日／日曜はウィークリー／月末はマンスリーも確定）
+      fetchDateRankingResults(currentUserRecord.id, dateKeyStr).catch(() => [])
     ]);
     loadingEl.hidden = true;
 
@@ -3192,6 +3301,7 @@ async function loadPlayerLogDayDetail(dateKeyStr) {
 
     contentEl.hidden = false;
     renderPlayerLogDaySummary(summary);
+    renderPlayerLogDayRankings(rankResults, dateKeyStr);
     renderBreakdownList("pl-category-list", categories, "category");
     renderBreakdownList("pl-difficulty-list", difficulties, "difficulty");
     renderPlayerLogDaySessions(sessions);
@@ -3210,6 +3320,42 @@ function renderPlayerLogDaySummary(s) {
   document.getElementById("pl-day-rate").textContent = rate === null ? "記録なし" : `${rate}%`;
   document.getElementById("pl-day-time").textContent = plFormatStudyDuration(s.study_seconds);
   document.getElementById("pl-day-exp").textContent = `+${s.earned_exp} EXP`;
+}
+
+// その日のランキング実績（順位に応じて豪華なカードで表示する）。
+// 今日の分はまだ確定していないため「暫定」の注記を付ける
+function renderPlayerLogDayRankings(rows, dateKeyStr) {
+  const wrap = document.getElementById("pl-day-rankings");
+  if (!wrap) return;
+  wrap.innerHTML = "";
+  const list = rows || [];
+  wrap.hidden = list.length === 0;
+
+  const isToday = dateKeyStr === plTodayKey();
+  list.forEach((r) => {
+    const tier = rankResultTier(r.rank);
+    const card = document.createElement("div");
+    card.className = `pl-rank-card pl-rank-${tier}`;
+
+    const medal = document.createElement("span");
+    medal.className = "pl-rank-medal";
+    medal.textContent = rankResultMedal(r.rank);
+
+    const body = document.createElement("div");
+    body.className = "pl-rank-body";
+    const label = document.createElement("p");
+    label.className = "pl-rank-label";
+    label.textContent = (RANK_PERIOD_LABELS[r.period] || r.period) + (isToday && r.period === "daily" ? "（暫定）" : "");
+    const rankLine = document.createElement("p");
+    rankLine.className = "pl-rank-line";
+    rankLine.innerHTML = `<b>${r.rank}位</b>／${r.participants}人中 ・ 解答${r.answered_count}問`;
+    body.appendChild(label);
+    body.appendChild(rankLine);
+
+    card.appendChild(medal);
+    card.appendChild(body);
+    wrap.appendChild(card);
+  });
 }
 
 // ジャンル別・難易度別で共通の内訳リスト（項目名・正解率バー・n/n問正解）を組み立てる
@@ -3351,12 +3497,12 @@ async function refreshPlayerLogHomeCard() {
 let currentRankingType = "overall";
 
 const RANKING_SUBCOPY = {
-  overall: "正答率が高い順（上位5名＋あなたの順位）",
+  overall: "プレイヤーレベルが高い順（上位5名＋あなたの順位）",
   streak: "毎日欠かさずログインしている日数が多い順（上位5名＋あなたの順位）",
-  weekly: "直近7日間の正解数が多い順（上位5名＋あなたの順位）",
-  monthly: "直近30日間の正解数が多い順（上位5名＋あなたの順位）",
+  daily: "今日の解答数が多い順（上位5名＋あなたの順位）",
+  weekly: "直近7日間の解答数が多い順（上位5名＋あなたの順位）",
+  monthly: "直近30日間の解答数が多い順（上位5名＋あなたの順位）",
   combo: "最大コンボ数が多い順（上位5名＋あなたの順位）",
-  suppression: "正答率が高い順（上位5名＋あなたの順位）",
   missions: "累計解答数が多い順（上位5名＋あなたの順位）",
   review: "要再挑戦リストの復習正解数が多い順（上位5名＋あなたの順位）"
 };
@@ -3410,24 +3556,24 @@ function buildRankingStatsLines(type, row) {
         headline: `連続ログイン ${row.streak_days}日`,
         detail: [`最終ログイン：${formatDateJp(row.last_active_date)}`, levelLine]
       };
+    case "daily":
+      return {
+        headline: `今日の解答数 ${row.daily_answered}問`,
+        detail: [`今日の正解数 ${row.daily_correct}問`, levelLine]
+      };
     case "weekly":
       return {
-        headline: `今週の正解数 ${row.weekly_correct}問`,
-        detail: [`今週の解答数 ${row.weekly_answered}問`, levelLine]
+        headline: `今週の解答数 ${row.weekly_answered}問`,
+        detail: [`今週の正解数 ${row.weekly_correct}問`, levelLine]
       };
     case "monthly":
       return {
-        headline: `今月の正解数 ${row.monthly_correct}問`,
-        detail: [`今月の解答数 ${row.monthly_answered}問`, levelLine]
+        headline: `今月の解答数 ${row.monthly_answered}問`,
+        detail: [`今月の正解数 ${row.monthly_correct}問`, levelLine]
       };
     case "combo":
       return {
         headline: `最大コンボ ${row.best_streak}`,
-        detail: [levelLine]
-      };
-    case "suppression":
-      return {
-        headline: `正答率 ${row.best_rate}%`,
         detail: [levelLine]
       };
     case "missions":
@@ -3441,11 +3587,12 @@ function buildRankingStatsLines(type, row) {
         detail: [levelLine]
       };
     default:
+      // 総合：プレイヤーレベルで競うランキング
       return {
-        headline: `正答率 ${row.best_rate}%`,
+        headline: `Lv.${row.level ?? 1} ${getLevelTitle(row.level ?? 1)}`,
         detail: [
-          levelLine,
-          `正答数 ${row.best_score}問 ／ コンボ ${row.current_streak}（最高${row.best_streak}） ／ 累計 ${row.total_answered}問`
+          `累計EXP ${(row.total_exp ?? 0).toLocaleString()}`,
+          `累計 ${row.total_answered}問 ／ 最大コンボ ${row.best_streak}`
         ]
       };
   }

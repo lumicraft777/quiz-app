@@ -9,7 +9,7 @@
 <!-- style.css / script.js を編集したら ?v= の数字を必ず増やすこと。
      増やさないと、ブラウザにキャッシュされた古いファイルが
      読み込まれ続け、コード修正がユーザーの端末に反映されないため。 -->
-<link rel="stylesheet" href="style.css?v=39">
+<link rel="stylesheet" href="style.css?v=40">
 </head>
 <body>
 
@@ -123,6 +123,19 @@
     <p id="badge-unlock-title" class="badge-unlock-title"></p>
     <p id="badge-unlock-desc" class="badge-unlock-desc"></p>
     <button type="button" id="btn-badge-unlock-close" class="btn-primary btn-large">閉じる</button>
+  </div>
+</div>
+
+<!-- ランキング確定結果の発表（前日・先週・先月の最終順位をログイン時に演出付きで表示） -->
+<div id="rank-result-overlay" class="levelup-overlay rank-result-overlay" hidden>
+  <div class="levelup-card rank-result-card" id="rank-result-card">
+    <p class="rank-result-header">RANKING RESULT</p>
+    <p id="rank-result-period" class="rank-result-period"></p>
+    <p id="rank-result-medal" class="rank-result-medal"></p>
+    <p id="rank-result-rank" class="rank-result-rank"></p>
+    <p id="rank-result-stats" class="rank-result-stats"></p>
+    <p id="rank-result-message" class="rank-result-message"></p>
+    <button type="button" id="btn-rank-result-close" class="btn-primary btn-large">確認完了</button>
   </div>
 </div>
 
@@ -499,16 +512,16 @@
     <button type="button" id="btn-ranking-back-top" class="ranking-back-top">← 戻る</button>
     <header class="app-header">
       <h1>攻略者ボード</h1>
-      <p id="ranking-sub" class="app-sub">正答率が高い順（上位5名＋あなたの順位）</p>
+      <p id="ranking-sub" class="app-sub">プレイヤーレベルが高い順（上位5名＋あなたの順位）</p>
     </header>
 
     <div class="ranking-tabs" id="ranking-tabs">
       <button type="button" class="ranking-tab-btn selected" data-ranking="overall">総合</button>
       <button type="button" class="ranking-tab-btn" data-ranking="streak">継続日数</button>
+      <button type="button" class="ranking-tab-btn" data-ranking="daily">今日</button>
       <button type="button" class="ranking-tab-btn" data-ranking="weekly">今週</button>
       <button type="button" class="ranking-tab-btn" data-ranking="monthly">今月</button>
       <button type="button" class="ranking-tab-btn" data-ranking="combo">コンボ</button>
-      <button type="button" class="ranking-tab-btn" data-ranking="suppression">正答率</button>
       <button type="button" class="ranking-tab-btn" data-ranking="missions">任務数</button>
       <button type="button" class="ranking-tab-btn" data-ranking="review">復習</button>
     </div>
@@ -596,6 +609,8 @@
 
       <div id="pl-day-content" hidden>
         <p class="pl-day-complete-tag">TRAINING COMPLETE</p>
+        <!-- この日の確定ランキング実績（デイリー毎日／ウィークリーは日曜／マンスリーは月末に確定） -->
+        <div id="pl-day-rankings" class="pl-day-rankings" hidden></div>
         <div class="pl-day-stats-grid">
           <div class="pl-day-stat"><span class="pl-day-stat-value" id="pl-day-answered">-</span><span class="pl-day-stat-label">挑戦問題数</span></div>
           <div class="pl-day-stat"><span class="pl-day-stat-value" id="pl-day-correct">-</span><span class="pl-day-stat-label">正解数</span></div>
@@ -807,6 +822,6 @@
 
 </div>
 
-<script src="script.js?v=55"></script>
+<script src="script.js?v=57"></script>
 </body>
 </html>

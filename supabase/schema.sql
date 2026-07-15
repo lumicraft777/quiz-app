@@ -742,10 +742,9 @@ as $$
 $$;
 
 -- ================================================================
--- RPC 5: ランキング（全ユーザー横断。PINやIDなど機微な情報は含めない）
--- 並び順は既存どおり正答率→正答数。level/total_expは表示用の追加情報。
--- 表示は「上位5名＋（圏外なら）自分の行」。rank列で実際の順位を返し、
--- is_self=trueの行がリクエストしたプレイヤー自身。
+-- RPC 5: 総合ランキング（全ユーザー横断。PINやIDなど機微な情報は含めない）
+-- 並び順はユーザーレベル→累計EXP。表示は「上位5名＋（圏外なら）自分の行」。
+-- rank列で実際の順位を返し、is_self=trueの行がリクエストしたプレイヤー自身。
 -- ================================================================
 drop function if exists rpc_get_ranking();
 drop function if exists rpc_get_ranking(uuid);
@@ -759,7 +758,7 @@ language sql
 security definer
 as $$
   with ranked as (
-    select row_number() over (order by u.best_rate desc, u.best_score desc)::int as rank,
+    select row_number() over (order by u.level desc, u.total_exp desc)::int as rank,
            u.id, u.username, u.best_score, u.best_rate, u.total_answered, u.total_correct,
            u.current_streak, u.best_streak, u.level, u.total_exp, b.title, b.tier
     from users u
@@ -1239,6 +1238,35 @@ as $$
   order by r.rank;
 $$;
 
+-- 今日・今週・今月ランキングはいずれも「解答した問題数」の多い順
+-- （正解数は参考情報として同時に返す。日付の区切りは日本時間）
+drop function if exists rpc_get_daily_ranking();
+drop function if exists rpc_get_daily_ranking(uuid);
+create or replace function rpc_get_daily_ranking(p_user_id uuid default null)
+returns table (rank int, username text, daily_correct int, daily_answered int, level int, total_exp int, equipped_badge_title text, equipped_badge_tier text, is_self boolean)
+language sql
+security definer
+as $$
+  with agg as (
+    select u.id, u.username,
+           count(*) filter (where ah.correct)::int as daily_correct,
+           count(*)::int as daily_answered,
+           u.level, u.total_exp, b.title, b.tier
+    from answer_history ah
+    join users u on u.id = ah.user_id
+    left join badges b on b.key = u.equipped_badge_key
+    where (ah.answered_at at time zone 'Asia/Tokyo')::date = (now() at time zone 'Asia/Tokyo')::date
+    group by u.id, u.username, u.level, u.total_exp, b.title, b.tier
+  ), ranked as (
+    select row_number() over (order by a.daily_answered desc, a.daily_correct desc)::int as rank, a.*
+    from agg a
+  )
+  select r.rank, r.username, r.daily_correct, r.daily_answered, r.level, r.total_exp, r.title, r.tier, (r.id = p_user_id)
+  from ranked r
+  where r.rank <= 5 or r.id = p_user_id
+  order by r.rank;
+$$;
+
 drop function if exists rpc_get_weekly_ranking();
 drop function if exists rpc_get_weekly_ranking(uuid);
 create or replace function rpc_get_weekly_ranking(p_user_id uuid default null)
@@ -1257,7 +1285,7 @@ as $$
     where ah.answered_at >= now() - interval '7 days'
     group by u.id, u.username, u.level, u.total_exp, b.title, b.tier
   ), ranked as (
-    select row_number() over (order by a.weekly_correct desc, a.weekly_answered desc)::int as rank, a.*
+    select row_number() over (order by a.weekly_answered desc, a.weekly_correct desc)::int as rank, a.*
     from agg a
   )
   select r.rank, r.username, r.weekly_correct, r.weekly_answered, r.level, r.total_exp, r.title, r.tier, (r.id = p_user_id)
@@ -1284,7 +1312,7 @@ as $$
     where ah.answered_at >= now() - interval '30 days'
     group by u.id, u.username, u.level, u.total_exp, b.title, b.tier
   ), ranked as (
-    select row_number() over (order by a.monthly_correct desc, a.monthly_answered desc)::int as rank, a.*
+    select row_number() over (order by a.monthly_answered desc, a.monthly_correct desc)::int as rank, a.*
     from agg a
   )
   select r.rank, r.username, r.monthly_correct, r.monthly_answered, r.level, r.total_exp, r.title, r.tier, (r.id = p_user_id)
@@ -1313,25 +1341,9 @@ as $$
   order by r.rank;
 $$;
 
+-- 正答率ランキングは廃止（drop文だけ残し、実行済みの環境からも関数を取り除く）
 drop function if exists rpc_get_suppression_ranking();
 drop function if exists rpc_get_suppression_ranking(uuid);
-create or replace function rpc_get_suppression_ranking(p_user_id uuid default null)
-returns table (rank int, username text, best_rate int, level int, total_exp int, equipped_badge_title text, equipped_badge_tier text, is_self boolean)
-language sql
-security definer
-as $$
-  with ranked as (
-    select row_number() over (order by u.best_rate desc, u.username asc)::int as rank,
-           u.id, u.username, u.best_rate, u.level, u.total_exp, b.title, b.tier
-    from users u
-    left join badges b on b.key = u.equipped_badge_key
-    where u.total_answered > 0
-  )
-  select r.rank, r.username, r.best_rate, r.level, r.total_exp, r.title, r.tier, (r.id = p_user_id)
-  from ranked r
-  where r.rank <= 5 or r.id = p_user_id
-  order by r.rank;
-$$;
 
 drop function if exists rpc_get_mission_count_ranking();
 drop function if exists rpc_get_mission_count_ranking(uuid);
@@ -1371,4 +1383,105 @@ as $$
   from ranked r
   where r.rank <= 5 or r.id = p_user_id
   order by r.rank;
+$$;
+
+-- ================================================================
+-- 期間確定ランキング（結果発表・PLAYER LOG記録用）
+-- ----------------------------------------------------------------
+-- 「終わった期間」の解答数ランキングにおける自分の最終順位を、
+-- answer_historyから都度計算して返す（過去の解答は変わらないため、
+-- スナップショットを保存しなくても順位は常に同じ値に確定する）。
+-- 日付の区切りはすべて日本時間。
+-- ================================================================
+-- 共通ヘルパー：指定期間の解答数ランキングでの自分の順位と参加人数
+create or replace function fn_period_rank(p_user_id uuid, p_start date, p_end date)
+returns table (rank int, participants int, answered_count int, correct_count int)
+language sql
+security definer
+as $$
+  with agg as (
+    select ah.user_id,
+           count(*)::int as answered,
+           count(*) filter (where ah.correct)::int as corr
+    from answer_history ah
+    where (ah.answered_at at time zone 'Asia/Tokyo')::date between p_start and p_end
+    group by ah.user_id
+  ), ranked as (
+    select a.user_id, a.answered, a.corr,
+           row_number() over (order by a.answered desc, a.corr desc)::int as rnk,
+           count(*) over ()::int as total
+    from agg a
+  )
+  select r.rnk, r.total, r.answered, r.corr
+  from ranked r
+  where r.user_id = p_user_id;
+$$;
+
+-- PLAYER LOG用：指定した日付の「その日の実績としてのランキング結果」。
+-- ・daily：その日の解答数ランキング（毎日）
+-- ・weekly：その日が日曜日なら、その週（月〜日）の最終順位
+-- ・monthly：その日が月末日なら、その月の最終順位
+drop function if exists rpc_get_date_ranking_results(uuid, date);
+create or replace function rpc_get_date_ranking_results(p_user_id uuid, p_date date)
+returns table (period text, period_key text, rank int, participants int, answered_count int, correct_count int)
+language plpgsql
+security definer
+as $$
+declare
+  v_month_end date := (date_trunc('month', p_date) + interval '1 month')::date - 1;
+begin
+  return query
+    select 'daily'::text, to_char(p_date, 'YYYY-MM-DD'), f.rank, f.participants, f.answered_count, f.correct_count
+    from fn_period_rank(p_user_id, p_date, p_date) f;
+
+  if extract(isodow from p_date) = 7 then
+    return query
+      select 'weekly'::text, to_char(p_date, 'YYYY-MM-DD'), f.rank, f.participants, f.answered_count, f.correct_count
+      from fn_period_rank(p_user_id, p_date - 6, p_date) f;
+  end if;
+
+  if p_date = v_month_end then
+    return query
+      select 'monthly'::text, to_char(p_date, 'YYYY-MM'), f.rank, f.participants, f.answered_count, f.correct_count
+      from fn_period_rank(p_user_id, date_trunc('month', p_date)::date, p_date) f;
+  end if;
+end;
+$$;
+
+-- ログイン時の結果発表用：直近に「確定した」期間（前日・先週・先月）の
+-- 自分の最終順位。参加していない期間の行は返らない。
+-- period_keyはクライアントが「この結果は表示済みか」を判定するためのID。
+drop function if exists rpc_get_previous_period_results(uuid);
+create or replace function rpc_get_previous_period_results(p_user_id uuid)
+returns table (period text, period_key text, period_start date, period_end date, rank int, participants int, answered_count int, correct_count int)
+language plpgsql
+security definer
+as $$
+declare
+  v_today date := (now() at time zone 'Asia/Tokyo')::date;
+  v_yesterday date := v_today - 1;
+  v_this_week_start date := date_trunc('week', v_today)::date; -- 今週の月曜
+  v_last_month_start date := (date_trunc('month', v_today) - interval '1 month')::date;
+  v_last_month_end date := date_trunc('month', v_today)::date - 1;
+begin
+  -- 前日のデイリーランキング
+  return query
+    select 'daily'::text, to_char(v_yesterday, 'YYYY-MM-DD'), v_yesterday, v_yesterday,
+           f.rank, f.participants, f.answered_count, f.correct_count
+    from fn_period_rank(p_user_id, v_yesterday, v_yesterday) f;
+
+  -- 先週（月〜日）のウィークリーランキング
+  return query
+    select 'weekly'::text, to_char(v_this_week_start - 1, 'YYYY-MM-DD'),
+           v_this_week_start - 7, v_this_week_start - 1,
+           f.rank, f.participants, f.answered_count, f.correct_count
+    from fn_period_rank(p_user_id, v_this_week_start - 7, v_this_week_start - 1) f;
+
+  -- 先月のマンスリーランキング
+  return query
+    select 'monthly'::text, to_char(v_last_month_start, 'YYYY-MM'),
+           v_last_month_start, v_last_month_end,
+           f.rank, f.participants, f.answered_count, f.correct_count
+    from fn_period_rank(p_user_id, v_last_month_start, v_last_month_end) f;
+end;
 $$;
