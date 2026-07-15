@@ -81,9 +81,24 @@ create table if not exists users (
   created_at timestamptz not null default now()
 );
 
--- 装備中の称号（badgesテーブルはこの後で定義されるため、ここではFK制約は付けない。
--- 実際に装備できるかどうかはrpc_set_equipped_badge側でuser_badgesを見て検証する）
+-- 装備中の称号（実際に装備できるかどうかはrpc_set_equipped_badge側で
+-- user_badgesを見て検証するため、ここではFK制約は付けない）
 alter table users add column if not exists equipped_badge_key text;
+
+-- ================================================================
+-- badges: 称号マスタの「器」を先に確保する
+-- （この後のランキングRPCなどがb.title/b.is_secret/b.tierを参照するため、
+--   テーブルと列の存在だけ先に保証する。RLS・シードデータ・各列の
+--   詳しい説明は後方の「称号・バッジ」セクションを参照）
+-- ================================================================
+create table if not exists badges (
+  key text primary key,
+  title text not null,
+  description text not null,
+  sort_order int not null default 0
+);
+alter table badges add column if not exists is_secret boolean not null default false;
+alter table badges add column if not exists tier text not null default 'bronze';
 
 -- ================================================================
 -- answer_history: 回答履歴。不正解/正解済みリストもここから導出する
@@ -738,7 +753,7 @@ create or replace function rpc_get_ranking(p_user_id uuid default null)
 returns table (
   rank int, username text, best_score int, best_rate int,
   total_answered int, total_correct int, current_streak int, best_streak int,
-  level int, total_exp int, equipped_badge_title text, is_self boolean
+  level int, total_exp int, equipped_badge_title text, equipped_badge_tier text, is_self boolean
 )
 language sql
 security definer
@@ -746,12 +761,12 @@ as $$
   with ranked as (
     select row_number() over (order by u.best_rate desc, u.best_score desc)::int as rank,
            u.id, u.username, u.best_score, u.best_rate, u.total_answered, u.total_correct,
-           u.current_streak, u.best_streak, u.level, u.total_exp, b.title
+           u.current_streak, u.best_streak, u.level, u.total_exp, b.title, b.tier
     from users u
     left join badges b on b.key = u.equipped_badge_key
   )
   select r.rank, r.username, r.best_score, r.best_rate, r.total_answered, r.total_correct,
-         r.current_streak, r.best_streak, r.level, r.total_exp, r.title, (r.id = p_user_id)
+         r.current_streak, r.best_streak, r.level, r.total_exp, r.title, r.tier, (r.id = p_user_id)
   from ranked r
   where r.rank <= 5 or r.id = p_user_id
   order by r.rank;
@@ -808,71 +823,68 @@ $$;
 
 -- ================================================================
 -- badges: 称号・バッジのマスタ定義
+-- （テーブル本体と列の追加は、ランキングRPCより先に実行する必要が
+--   あるためファイル前方の「badges: 称号マスタの器」ブロックにある。
+--   is_secret＝解放するまで？？？表示する隠しフラグ、
+--   tier＝レア度：bronze < silver < gold < legend < secret < master）
 -- ================================================================
-create table if not exists badges (
-  key text primary key,
-  title text not null,
-  description text not null,
-  sort_order int not null default 0
-);
 alter table badges enable row level security;
 drop policy if exists "badges are readable by anyone" on badges;
 create policy "badges are readable by anyone" on badges for select using (true);
 
--- 隠し称号フラグ。trueの称号は、解放するまでクライアント側で
--- タイトル・解放条件を「？？？」として伏せて表示する
-alter table badges add column if not exists is_secret boolean not null default false;
-
--- 称号の定義はこのシードが正（再実行すると文言・並び順・隠しフラグが最新化される）
-insert into badges (key, title, description, sort_order, is_secret) values
+-- 称号の定義はこのシードが正（再実行すると文言・並び順・隠しフラグ・レア度が最新化される）
+insert into badges (key, title, description, sort_order, is_secret, tier) values
   -- 解答数・成長の道のり
-  ('first_correct', 'はじめの一歩', '初めて1問正解した', 1, false),
-  ('trainee_30', '訓練兵', '累計30問以上に解答した', 2, false),
-  ('conqueror_100', '攻略者', '累計100問以上に解答した', 3, false),
-  ('conqueror_300', '歴戦の攻略者', '累計300問以上に解答した', 4, false),
-  ('answers_1000', '千戦錬磨', '累計1000問以上に解答した', 5, false),
-  ('correct_200', '精鋭の証', '累計200問以上に正解した', 6, false),
+  ('first_correct', 'はじめの一歩', '初めて1問正解した', 1, false, 'bronze'),
+  ('trainee_30', '訓練兵', '累計30問以上に解答した', 2, false, 'bronze'),
+  ('conqueror_100', '攻略者', '累計100問以上に解答した', 3, false, 'silver'),
+  ('conqueror_300', '歴戦の攻略者', '累計300問以上に解答した', 4, false, 'gold'),
+  ('answers_1000', '千戦錬磨', '累計1000問以上に解答した', 5, false, 'legend'),
+  ('correct_200', '精鋭の証', '累計200問以上に正解した', 6, false, 'gold'),
   -- コンボ
-  ('combo_10', '集中モード', '10問連続正解を達成した', 7, false),
-  ('combo_20', '連撃マスター', '最大20連続正解を達成した', 8, false),
-  ('combo_30', '怒涛の連撃', '最大30連続正解を達成した', 9, false),
-  ('combo_50', 'ゾーンの支配者', '最大50連続正解を達成した', 10, false),
+  ('combo_10', '集中モード', '10問連続正解を達成した', 7, false, 'bronze'),
+  ('combo_20', '連撃マスター', '最大20連続正解を達成した', 8, false, 'silver'),
+  ('combo_30', '怒涛の連撃', '最大30連続正解を達成した', 9, false, 'gold'),
+  ('combo_50', 'ゾーンの支配者', '最大50連続正解を達成した', 10, false, 'legend'),
   -- 完全制圧
-  ('perfect_clear', '完全制圧者', '正答率100%で任務を完了した', 11, false),
-  ('perfect_3', '常勝無敗', '5問以上の任務を正答率100%で3回完了した', 12, false),
+  ('perfect_clear', '完全制圧者', '正答率100%で任務を完了した', 11, false, 'silver'),
+  ('perfect_3', '常勝無敗', '5問以上の任務を正答率100%で3回完了した', 12, false, 'gold'),
   -- 上級・復習・克服
-  ('advanced_5', '上級アドバイザー', '上級問題に5問正解した', 13, false),
-  ('advanced_20', '上級を統べる者', '上級問題に20問正解した', 14, false),
-  ('review_master', '復習の鬼', '復習モードで5問正解した', 15, false),
-  ('review_20', '弱点ハンター', '復習モードで20問正解した', 16, false),
-  ('comeback_master', '再起の達人', '苦手だった問題をすべて復習し尽くした', 17, false),
+  ('advanced_5', '上級アドバイザー', '上級問題に5問正解した', 13, false, 'bronze'),
+  ('advanced_20', '上級を統べる者', '上級問題に20問正解した', 14, false, 'gold'),
+  ('review_master', '復習の鬼', '復習モードで5問正解した', 15, false, 'bronze'),
+  ('review_20', '弱点ハンター', '復習モードで20問正解した', 16, false, 'silver'),
+  ('comeback_master', '再起の達人', '苦手だった問題をすべて復習し尽くした', 17, false, 'gold'),
   -- 網羅・二刀流
-  ('all_rounder', 'オールラウンダー', '全エリアを1回以上プレイした', 18, false),
-  ('dual_master', '文武両道', '基礎任務と判断任務の両方で10問以上正解した', 19, false),
+  ('all_rounder', 'オールラウンダー', '全エリアを1回以上プレイした', 18, false, 'gold'),
+  ('dual_master', '文武両道', '基礎任務と判断任務の両方で10問以上正解した', 19, false, 'silver'),
   -- 継続
-  ('streak_3', '習慣化の入口', '3日間連続で学習した', 20, false),
-  ('streak_7', '継続の達人', '7日間連続でログインした', 21, false),
-  ('streak_14', '二週間の誓い', '14日間連続で学習した', 22, false),
-  ('streak_30', '鉄の意志', '30日間連続で学習した', 23, false),
+  ('streak_3', '習慣化の入口', '3日間連続で学習した', 20, false, 'bronze'),
+  ('streak_7', '継続の達人', '7日間連続でログインした', 21, false, 'silver'),
+  ('streak_14', '二週間の誓い', '14日間連続で学習した', 22, false, 'gold'),
+  ('streak_30', '鉄の意志', '30日間連続で学習した', 23, false, 'legend'),
   -- レベル・出撃回数
-  ('level_10', '新星', 'レベル10に到達した', 24, false),
-  ('level_30', '歴戦の勇士', 'レベル30に到達した', 25, false),
-  ('level_50', '仮想空間の英雄', 'レベル50に到達した', 26, false),
-  ('sessions_50', '歴戦の出撃', '任務に50回出撃した', 27, false),
+  ('level_10', '新星', 'レベル10に到達した', 24, false, 'bronze'),
+  ('level_30', '歴戦の勇士', 'レベル30に到達した', 25, false, 'gold'),
+  ('level_50', '仮想空間の英雄', 'レベル50に到達した', 26, false, 'legend'),
+  ('sessions_50', '歴戦の出撃', '任務に50回出撃した', 27, false, 'silver'),
   -- 隠し称号（解放するまで？？？表示）
-  ('zero_to_one', 'ZERO TO ONE', '覚悟0％から、最初の一歩を記録した', 90, true),
-  ('night_owl', '真夜中の修行者', '深夜0時〜4時の間に任務へ挑んだ', 91, true),
-  ('early_bird', '夜明けの狩人', '早朝4時〜7時の間に任務へ挑んだ', 92, true),
-  ('persistence', '七転八起', '3回以上間違えた問題に、ついに正解した', 93, true),
-  ('speedster', '電光石火', '10問以上の任務を3分以内に完了した', 94, true),
-  ('all_miss', 'どん底を見た者', '5問以上の任務で全問不正解でも、記録を残した', 95, true),
-  ('lucky_777', 'ラッキーセブン', '累計解答数777問に到達した', 96, true),
-  ('world_master', 'ワールドマスター', 'すべての問題に1回以上正解した', 97, true)
+  ('zero_to_one', 'ZERO TO ONE', '覚悟0％から、最初の一歩を記録した', 90, true, 'secret'),
+  ('night_owl', '真夜中の修行者', '深夜0時〜4時の間に任務へ挑んだ', 91, true, 'secret'),
+  ('early_bird', '夜明けの狩人', '早朝4時〜7時の間に任務へ挑んだ', 92, true, 'secret'),
+  ('persistence', '七転八起', '3回以上間違えた問題に、ついに正解した', 93, true, 'secret'),
+  ('speedster', '電光石火', '10問以上の任務を3分以内に完了した', 94, true, 'secret'),
+  ('all_miss', 'どん底を見た者', '5問以上の任務で全問不正解でも、記録を残した', 95, true, 'secret'),
+  ('lucky_777', 'ラッキーセブン', '累計解答数777問に到達した', 96, true, 'secret'),
+  ('world_master', 'ワールドマスター', 'すべての問題に1回以上正解した', 97, true, 'secret'),
+  -- ゲームマスター専用の特別称号（プレイヤー名で自動付与される唯一の称号）
+  ('game_master', 'ゲームマスター', 'この仮想訓練空間の創造主であることの証', 99, true, 'master')
 on conflict (key) do update set
   title = excluded.title,
   description = excluded.description,
   sort_order = excluded.sort_order,
-  is_secret = excluded.is_secret;
+  is_secret = excluded.is_secret,
+  tier = excluded.tier;
 
 -- user_badges: 誰がどのバッジを解放済みか
 create table if not exists user_badges (
@@ -923,13 +935,13 @@ alter table user_daily_mission_claims enable row level security;
 drop function if exists rpc_get_badges(uuid);
 create or replace function rpc_get_badges(p_user_id uuid)
 returns table (
-  key text, title text, description text, sort_order int, is_secret boolean,
+  key text, title text, description text, sort_order int, is_secret boolean, tier text,
   unlocked boolean, unlocked_at timestamptz
 )
 language sql
 security definer
 as $$
-  select b.key, b.title, b.description, b.sort_order, b.is_secret,
+  select b.key, b.title, b.description, b.sort_order, b.is_secret, b.tier,
          (ub.user_id is not null) as unlocked, ub.unlocked_at
   from badges b
   left join user_badges ub on ub.badge_key = b.key and ub.user_id = p_user_id
@@ -1055,7 +1067,9 @@ begin
       ('speedster', v_speed),
       ('all_miss', v_all_miss),
       ('lucky_777', v_user.total_answered >= 777),
-      ('world_master', v_questions_total > 0 and v_correct_distinct >= v_questions_total)
+      ('world_master', v_questions_total > 0 and v_correct_distinct >= v_questions_total),
+      -- ゲームマスター：このプレイヤー名でログインした瞬間に付与される特別称号
+      ('game_master', v_user.username = '吉沢')
     ) as conds(k, ok)
     where ok
     on conflict (user_id, badge_key) do nothing
@@ -1198,18 +1212,18 @@ $$;
 drop function if exists rpc_get_streak_ranking();
 drop function if exists rpc_get_streak_ranking(uuid);
 create or replace function rpc_get_streak_ranking(p_user_id uuid default null)
-returns table (rank int, username text, streak_days int, last_active_date date, level int, total_exp int, equipped_badge_title text, is_self boolean)
+returns table (rank int, username text, streak_days int, last_active_date date, level int, total_exp int, equipped_badge_title text, equipped_badge_tier text, is_self boolean)
 language sql
 security definer
 as $$
   with ranked as (
     select row_number() over (order by u.streak_days desc, u.last_active_date desc nulls last)::int as rank,
-           u.id, u.username, u.streak_days, u.last_active_date, u.level, u.total_exp, b.title
+           u.id, u.username, u.streak_days, u.last_active_date, u.level, u.total_exp, b.title, b.tier
     from users u
     left join badges b on b.key = u.equipped_badge_key
     where u.streak_days > 0
   )
-  select r.rank, r.username, r.streak_days, r.last_active_date, r.level, r.total_exp, r.title, (r.id = p_user_id)
+  select r.rank, r.username, r.streak_days, r.last_active_date, r.level, r.total_exp, r.title, r.tier, (r.id = p_user_id)
   from ranked r
   where r.rank <= 5 or r.id = p_user_id
   order by r.rank;
@@ -1218,7 +1232,7 @@ $$;
 drop function if exists rpc_get_weekly_ranking();
 drop function if exists rpc_get_weekly_ranking(uuid);
 create or replace function rpc_get_weekly_ranking(p_user_id uuid default null)
-returns table (rank int, username text, weekly_correct int, weekly_answered int, level int, total_exp int, equipped_badge_title text, is_self boolean)
+returns table (rank int, username text, weekly_correct int, weekly_answered int, level int, total_exp int, equipped_badge_title text, equipped_badge_tier text, is_self boolean)
 language sql
 security definer
 as $$
@@ -1226,17 +1240,17 @@ as $$
     select u.id, u.username,
            count(*) filter (where ah.correct)::int as weekly_correct,
            count(*)::int as weekly_answered,
-           u.level, u.total_exp, b.title
+           u.level, u.total_exp, b.title, b.tier
     from answer_history ah
     join users u on u.id = ah.user_id
     left join badges b on b.key = u.equipped_badge_key
     where ah.answered_at >= now() - interval '7 days'
-    group by u.id, u.username, u.level, u.total_exp, b.title
+    group by u.id, u.username, u.level, u.total_exp, b.title, b.tier
   ), ranked as (
     select row_number() over (order by a.weekly_correct desc, a.weekly_answered desc)::int as rank, a.*
     from agg a
   )
-  select r.rank, r.username, r.weekly_correct, r.weekly_answered, r.level, r.total_exp, r.title, (r.id = p_user_id)
+  select r.rank, r.username, r.weekly_correct, r.weekly_answered, r.level, r.total_exp, r.title, r.tier, (r.id = p_user_id)
   from ranked r
   where r.rank <= 5 or r.id = p_user_id
   order by r.rank;
@@ -1245,7 +1259,7 @@ $$;
 drop function if exists rpc_get_monthly_ranking();
 drop function if exists rpc_get_monthly_ranking(uuid);
 create or replace function rpc_get_monthly_ranking(p_user_id uuid default null)
-returns table (rank int, username text, monthly_correct int, monthly_answered int, level int, total_exp int, equipped_badge_title text, is_self boolean)
+returns table (rank int, username text, monthly_correct int, monthly_answered int, level int, total_exp int, equipped_badge_title text, equipped_badge_tier text, is_self boolean)
 language sql
 security definer
 as $$
@@ -1253,17 +1267,17 @@ as $$
     select u.id, u.username,
            count(*) filter (where ah.correct)::int as monthly_correct,
            count(*)::int as monthly_answered,
-           u.level, u.total_exp, b.title
+           u.level, u.total_exp, b.title, b.tier
     from answer_history ah
     join users u on u.id = ah.user_id
     left join badges b on b.key = u.equipped_badge_key
     where ah.answered_at >= now() - interval '30 days'
-    group by u.id, u.username, u.level, u.total_exp, b.title
+    group by u.id, u.username, u.level, u.total_exp, b.title, b.tier
   ), ranked as (
     select row_number() over (order by a.monthly_correct desc, a.monthly_answered desc)::int as rank, a.*
     from agg a
   )
-  select r.rank, r.username, r.monthly_correct, r.monthly_answered, r.level, r.total_exp, r.title, (r.id = p_user_id)
+  select r.rank, r.username, r.monthly_correct, r.monthly_answered, r.level, r.total_exp, r.title, r.tier, (r.id = p_user_id)
   from ranked r
   where r.rank <= 5 or r.id = p_user_id
   order by r.rank;
@@ -1272,18 +1286,18 @@ $$;
 drop function if exists rpc_get_combo_ranking();
 drop function if exists rpc_get_combo_ranking(uuid);
 create or replace function rpc_get_combo_ranking(p_user_id uuid default null)
-returns table (rank int, username text, best_streak int, level int, total_exp int, equipped_badge_title text, is_self boolean)
+returns table (rank int, username text, best_streak int, level int, total_exp int, equipped_badge_title text, equipped_badge_tier text, is_self boolean)
 language sql
 security definer
 as $$
   with ranked as (
     select row_number() over (order by u.best_streak desc)::int as rank,
-           u.id, u.username, u.best_streak, u.level, u.total_exp, b.title
+           u.id, u.username, u.best_streak, u.level, u.total_exp, b.title, b.tier
     from users u
     left join badges b on b.key = u.equipped_badge_key
     where u.best_streak > 0
   )
-  select r.rank, r.username, r.best_streak, r.level, r.total_exp, r.title, (r.id = p_user_id)
+  select r.rank, r.username, r.best_streak, r.level, r.total_exp, r.title, r.tier, (r.id = p_user_id)
   from ranked r
   where r.rank <= 5 or r.id = p_user_id
   order by r.rank;
@@ -1292,18 +1306,18 @@ $$;
 drop function if exists rpc_get_suppression_ranking();
 drop function if exists rpc_get_suppression_ranking(uuid);
 create or replace function rpc_get_suppression_ranking(p_user_id uuid default null)
-returns table (rank int, username text, best_rate int, level int, total_exp int, equipped_badge_title text, is_self boolean)
+returns table (rank int, username text, best_rate int, level int, total_exp int, equipped_badge_title text, equipped_badge_tier text, is_self boolean)
 language sql
 security definer
 as $$
   with ranked as (
     select row_number() over (order by u.best_rate desc, u.username asc)::int as rank,
-           u.id, u.username, u.best_rate, u.level, u.total_exp, b.title
+           u.id, u.username, u.best_rate, u.level, u.total_exp, b.title, b.tier
     from users u
     left join badges b on b.key = u.equipped_badge_key
     where u.total_answered > 0
   )
-  select r.rank, r.username, r.best_rate, r.level, r.total_exp, r.title, (r.id = p_user_id)
+  select r.rank, r.username, r.best_rate, r.level, r.total_exp, r.title, r.tier, (r.id = p_user_id)
   from ranked r
   where r.rank <= 5 or r.id = p_user_id
   order by r.rank;
@@ -1312,18 +1326,18 @@ $$;
 drop function if exists rpc_get_mission_count_ranking();
 drop function if exists rpc_get_mission_count_ranking(uuid);
 create or replace function rpc_get_mission_count_ranking(p_user_id uuid default null)
-returns table (rank int, username text, total_answered int, level int, total_exp int, equipped_badge_title text, is_self boolean)
+returns table (rank int, username text, total_answered int, level int, total_exp int, equipped_badge_title text, equipped_badge_tier text, is_self boolean)
 language sql
 security definer
 as $$
   with ranked as (
     select row_number() over (order by u.total_answered desc)::int as rank,
-           u.id, u.username, u.total_answered, u.level, u.total_exp, b.title
+           u.id, u.username, u.total_answered, u.level, u.total_exp, b.title, b.tier
     from users u
     left join badges b on b.key = u.equipped_badge_key
     where u.total_answered > 0
   )
-  select r.rank, r.username, r.total_answered, r.level, r.total_exp, r.title, (r.id = p_user_id)
+  select r.rank, r.username, r.total_answered, r.level, r.total_exp, r.title, r.tier, (r.id = p_user_id)
   from ranked r
   where r.rank <= 5 or r.id = p_user_id
   order by r.rank;
@@ -1332,18 +1346,18 @@ $$;
 drop function if exists rpc_get_review_ranking();
 drop function if exists rpc_get_review_ranking(uuid);
 create or replace function rpc_get_review_ranking(p_user_id uuid default null)
-returns table (rank int, username text, review_correct_count int, level int, total_exp int, equipped_badge_title text, is_self boolean)
+returns table (rank int, username text, review_correct_count int, level int, total_exp int, equipped_badge_title text, equipped_badge_tier text, is_self boolean)
 language sql
 security definer
 as $$
   with ranked as (
     select row_number() over (order by u.review_correct_count desc)::int as rank,
-           u.id, u.username, u.review_correct_count, u.level, u.total_exp, b.title
+           u.id, u.username, u.review_correct_count, u.level, u.total_exp, b.title, b.tier
     from users u
     left join badges b on b.key = u.equipped_badge_key
     where u.review_correct_count > 0
   )
-  select r.rank, r.username, r.review_correct_count, r.level, r.total_exp, r.title, (r.id = p_user_id)
+  select r.rank, r.username, r.review_correct_count, r.level, r.total_exp, r.title, r.tier, (r.id = p_user_id)
   from ranked r
   where r.rank <= 5 or r.id = p_user_id
   order by r.rank;

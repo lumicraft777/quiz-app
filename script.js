@@ -432,9 +432,13 @@ function renderBadges(badges) {
     const isHiddenSecret = b.is_secret && !b.unlocked;
     item.className = "badge-item" + (b.unlocked ? " unlocked" : " locked") + (isEquipped ? " equipped" : "");
     if (isHiddenSecret) item.classList.add("secret");
+    // 解放済みの称号はレア度に応じた見た目にする（上位ほど豪華な枠・発光）
+    if (b.unlocked && b.tier) item.classList.add(`tier-${b.tier}`);
     const icon = document.createElement("span");
     icon.className = "badge-item-icon";
-    icon.textContent = b.unlocked ? (isEquipped ? "⭐" : "🎖️") : (isHiddenSecret ? "❓" : "🔒");
+    // 隠し称号のアイコンは絵文字ではなく文字グリフにする
+    // （CSSのグラデーション文字＋発光エフェクトを効かせるため）
+    icon.textContent = b.unlocked ? (isEquipped ? "⭐" : "🎖️") : (isHiddenSecret ? "◈" : "🔒");
     const title = document.createElement("span");
     title.className = "badge-item-title";
     title.textContent = isHiddenSecret ? "？？？" : b.title;
@@ -1816,6 +1820,16 @@ async function startAsUser(rawName, rawPin) {
     // その裏でスタート画面へ切り替えてから白がフェードして
     // 「目を開けたらメイン画面にいる」ような没入感で遷移する
     await playDiveRevealTransition("接続完了。任務端末を起動します。", "screen-start");
+
+    // ログイン時点で条件を満たしている称号を付与する
+    // （ゲームマスターのようにプレイヤー名だけで解放される称号は、
+    //   任務をプレイしなくてもログイン直後に演出付きで受け取れる）
+    checkAndGrantBadges(currentUserRecord.id).then((newBadges) => {
+      if (newBadges.length > 0) {
+        setTimeout(() => showBadgeUnlockQueue(newBadges), 800);
+        refreshHomeExtras();
+      }
+    });
   } catch (err) {
     connectingOverlay.classList.remove("show", "syncing");
     setTimeout(() => { connectingOverlay.hidden = true; }, 300);
@@ -3341,6 +3355,16 @@ function setupRankingTabs() {
   });
 }
 
+// 称号タグのレア度ごとの先頭マーク（bronzeは無印、上位ほど豪華に）
+const RANKING_TAG_TIER_ICONS = {
+  bronze: "",
+  silver: "◇",
+  gold: "★",
+  legend: "◆",
+  secret: "✦",
+  master: "👑"
+};
+
 // 順位ごとの見た目（1位=金・2位=銀・3位=銅のふち、カードの大きさは1→2→3→4位の順に
 // 小さくなり、4位以降はすべて同じ最小サイズにして視覚的にメリハリを付ける）
 function buildRankingRowRankClass(rank) {
@@ -3478,9 +3502,13 @@ async function renderRankingScreen() {
         name.appendChild(selfTag);
       }
       if (row.equipped_badge_title) {
+        // 称号タグはレア度（tier）で見た目が変わる。難しい称号ほど豪華になり、
+        // シークレット・ゲームマスターは特別なエフェクト付き
+        const tier = row.equipped_badge_tier || "bronze";
         const titleTag = document.createElement("span");
-        titleTag.className = "ranking-title-tag";
-        titleTag.textContent = row.equipped_badge_title;
+        titleTag.className = `ranking-title-tag tag-tier-${tier}`;
+        const tierIcon = RANKING_TAG_TIER_ICONS[tier];
+        titleTag.textContent = (tierIcon ? tierIcon + " " : "") + row.equipped_badge_title;
         name.appendChild(titleTag);
       }
 

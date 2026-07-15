@@ -1655,6 +1655,70 @@ select:-webkit-autofill:focus {
   vertical-align: middle;
   white-space: nowrap;
 }
+/* ---- 称号タグのレア度別デザイン（達成が難しいほど豪華になる） ---- */
+.ranking-title-tag.tag-tier-bronze {
+  border-color: rgba(205, 127, 50, 0.65);
+  background: rgba(205, 127, 50, 0.12);
+  color: #e6b183;
+}
+.ranking-title-tag.tag-tier-silver {
+  border-color: rgba(207, 216, 230, 0.8);
+  background: rgba(207, 216, 230, 0.12);
+  color: #dbe4f0;
+  box-shadow: 0 0 8px rgba(207, 216, 230, 0.28);
+}
+.ranking-title-tag.tag-tier-gold {
+  border-color: #f2c94c;
+  background: linear-gradient(120deg, rgba(242, 201, 76, 0.24), rgba(255, 240, 170, 0.10), rgba(242, 201, 76, 0.24));
+  color: #ffe08a;
+  font-weight: bold;
+  box-shadow: 0 0 10px rgba(242, 201, 76, 0.45);
+}
+.ranking-title-tag.tag-tier-legend {
+  border: 1px solid transparent;
+  background:
+    linear-gradient(rgba(10, 6, 24, 0.92), rgba(10, 6, 24, 0.92)) padding-box,
+    linear-gradient(120deg, #b266ff, #ff31d8, #b266ff) border-box;
+  color: #e3b8ff;
+  font-weight: bold;
+  text-shadow: 0 0 6px rgba(178, 102, 255, 0.6);
+  box-shadow: 0 0 12px rgba(178, 102, 255, 0.5);
+}
+/* シークレット称号：紫→シアン→マゼンタの光が枠を流れ続ける */
+.ranking-title-tag.tag-tier-secret {
+  border: 1px solid transparent;
+  background:
+    linear-gradient(rgba(6, 3, 18, 0.94), rgba(6, 3, 18, 0.94)) padding-box,
+    linear-gradient(120deg, #b266ff, #22e3ff, #ff31d8, #b266ff) border-box;
+  background-size: 100% 100%, 300% 100%;
+  color: #f0eaff;
+  font-weight: bold;
+  text-shadow: 0 0 6px rgba(178, 102, 255, 0.8);
+  animation: secret-tag-flow 3s linear infinite, secret-tag-pulse 2.4s ease-in-out infinite;
+}
+@keyframes secret-tag-flow {
+  0% { background-position: 0 0, 0% 50%; }
+  100% { background-position: 0 0, 300% 50%; }
+}
+@keyframes secret-tag-pulse {
+  0%, 100% { box-shadow: 0 0 10px rgba(178, 102, 255, 0.45); }
+  50% { box-shadow: 0 0 18px rgba(34, 227, 255, 0.65); }
+}
+/* ゲームマスター専用：流れる虹色ホログラムの最上位デザイン */
+.ranking-title-tag.tag-tier-master {
+  border: 1px solid rgba(255, 255, 255, 0.75);
+  background: linear-gradient(120deg, #ff31d8, #ffb44c, #3dffa0, #22e3ff, #b266ff, #ff31d8);
+  background-size: 400% 100%;
+  color: #fff;
+  font-weight: bold;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.55);
+  box-shadow: 0 0 14px rgba(255, 255, 255, 0.35), 0 0 26px rgba(255, 49, 216, 0.4);
+  animation: master-tag-flow 4s linear infinite;
+}
+@keyframes master-tag-flow {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 400% 50%; }
+}
 /* 自分の行の強調（上位5名の中でも、圏外で下に付く場合でも共通） */
 .ranking-row-self {
   border-color: var(--color-accent) !important;
@@ -2445,15 +2509,102 @@ select:-webkit-autofill:focus {
 .badge-item.locked {
   opacity: 0.5;
 }
-/* 隠し称号（未解放）：存在だけを匂わせる紫がかった「？？？」表示 */
+/* ---- 解放済み称号のレア度別デザイン（上位ほど豪華な枠・発光） ---- */
+.badge-item.unlocked.tier-bronze {
+  border-color: rgba(205, 127, 50, 0.8);
+  background: rgba(205, 127, 50, 0.10);
+  box-shadow: 0 0 10px rgba(205, 127, 50, 0.18);
+}
+.badge-item.unlocked.tier-silver {
+  border-color: rgba(207, 216, 230, 0.85);
+  background: rgba(207, 216, 230, 0.10);
+  box-shadow: 0 0 10px rgba(207, 216, 230, 0.25);
+}
+.badge-item.unlocked.tier-gold {
+  border-color: #f2c94c;
+  background: rgba(242, 201, 76, 0.12);
+  box-shadow: 0 0 14px rgba(242, 201, 76, 0.35);
+}
+.badge-item.unlocked.tier-legend {
+  border: 1.5px solid transparent;
+  background:
+    linear-gradient(rgba(12, 7, 28, 0.9), rgba(12, 7, 28, 0.9)) padding-box,
+    linear-gradient(130deg, #b266ff, #ff31d8, #b266ff) border-box;
+  box-shadow: 0 0 16px rgba(178, 102, 255, 0.45);
+}
+.badge-item.unlocked.tier-secret {
+  border: 1.5px solid transparent;
+  background:
+    linear-gradient(rgba(8, 4, 22, 0.92), rgba(8, 4, 22, 0.92)) padding-box,
+    linear-gradient(130deg, #b266ff, #22e3ff, #ff31d8, #b266ff) border-box;
+  background-size: 100% 100%, 320% 320%;
+  box-shadow: 0 0 16px rgba(178, 102, 255, 0.5);
+  animation: secret-border-flow 5s linear infinite;
+}
+.badge-item.unlocked.tier-master {
+  border: 1.5px solid rgba(255, 255, 255, 0.75);
+  background:
+    linear-gradient(rgba(10, 6, 22, 0.82), rgba(10, 6, 22, 0.82)) padding-box,
+    linear-gradient(120deg, #ff31d8, #ffb44c, #3dffa0, #22e3ff, #b266ff, #ff31d8) border-box;
+  background-size: 100% 100%, 400% 400%;
+  box-shadow: 0 0 18px rgba(255, 255, 255, 0.25), 0 0 30px rgba(255, 49, 216, 0.35);
+  animation: secret-border-flow 4s linear infinite;
+}
+
+/* ---- 隠し称号（未解放）：正体不明の遺物のようなホログラム演出 ---- */
 .badge-item.secret {
-  border-color: rgba(178, 102, 255, 0.4);
-  background: rgba(178, 102, 255, 0.06);
+  position: relative;
+  overflow: hidden;
+  opacity: 1; /* .lockedの半透明を打ち消し、存在感を出す */
+  border: 1.5px solid transparent;
+  background:
+    linear-gradient(rgba(8, 4, 22, 0.92), rgba(8, 4, 22, 0.92)) padding-box,
+    linear-gradient(130deg, rgba(178, 102, 255, 0.9), rgba(34, 227, 255, 0.7), rgba(255, 49, 216, 0.9), rgba(178, 102, 255, 0.9)) border-box;
+  background-size: 100% 100%, 320% 320%;
+  box-shadow: 0 0 14px rgba(178, 102, 255, 0.3);
+  animation: secret-border-flow 5s linear infinite;
+}
+/* 表面を周期的に走る斜めの光（ホログラムの反射） */
+.badge-item.secret::after {
+  content: "";
+  position: absolute;
+  top: -120%;
+  left: -60%;
+  width: 40%;
+  height: 300%;
+  background: linear-gradient(105deg, transparent, rgba(178, 102, 255, 0.20), transparent);
+  transform: rotate(18deg);
+  animation: secret-sheen 3.6s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes secret-border-flow {
+  0% { background-position: 0 0, 0% 0%; }
+  100% { background-position: 0 0, 320% 320%; }
+}
+@keyframes secret-sheen {
+  0%, 55% { left: -60%; }
+  90%, 100% { left: 130%; }
+}
+.badge-item.secret .badge-item-icon {
+  background: linear-gradient(130deg, #b266ff, #22e3ff, #ff31d8);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: secret-icon-pulse 2s ease-in-out infinite;
+}
+@keyframes secret-icon-pulse {
+  0%, 100% { filter: drop-shadow(0 0 4px rgba(178, 102, 255, 0.6)); }
+  50% { filter: drop-shadow(0 0 10px rgba(34, 227, 255, 0.9)); }
 }
 .badge-item.secret .badge-item-title {
-  color: #c9a2ff;
-  letter-spacing: 0.2em;
+  color: #d9c5ff;
+  letter-spacing: 0.24em;
+  text-shadow: 0 0 8px rgba(178, 102, 255, 0.7);
 }
+.badge-item.secret .badge-item-desc {
+  color: rgba(200, 180, 255, 0.55);
+}
+
 .badge-item.tappable {
   cursor: pointer;
   transition: border-color 0.15s, box-shadow 0.15s, transform 0.1s;
@@ -2462,10 +2613,10 @@ select:-webkit-autofill:focus {
 .badge-item.tappable:focus-visible {
   transform: translateY(-1px);
 }
+/* 装備中はレア度の見た目を保ったまま、外側のシアン輪郭で示す */
 .badge-item.equipped {
-  border-color: var(--color-primary);
-  background: rgba(34, 227, 255, 0.14);
-  box-shadow: 0 0 14px rgba(34, 227, 255, 0.5);
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
 }
 .badge-item-icon {
   font-size: 1.4rem;
