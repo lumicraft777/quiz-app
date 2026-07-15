@@ -471,6 +471,8 @@ async function toggleEquipBadge(badgeKey, isCurrentlyEquipped) {
       p_badge_key: nextKey
     });
     const row = rows[0];
+    // アカウントが見つからない場合（削除済みユーザーでログインしたまま等）は空が返る
+    if (!row) throw new Error("プレイヤー情報が見つかりません。再ログインしてください");
     currentUserRecord.equippedBadgeKey = row.equipped_badge_key || null;
     currentUserRecord.equippedBadgeTitle = row.equipped_badge_title || null;
     const badges = await fetchBadges(currentUserRecord.id);
@@ -3222,7 +3224,9 @@ function renderBreakdownList(containerId, rows, labelKey) {
     return;
   }
   rows.forEach((r) => {
-    wrap.appendChild(buildBreakdownRow(r[labelKey], r.answered_count, r.correct_count));
+    // ジャンル別はエリア選択と同じ「1章 太陽光発電」のような章番号付き表記にそろえる
+    const label = labelKey === "category" ? categoryDisplayLabel(r[labelKey]) : r[labelKey];
+    wrap.appendChild(buildBreakdownRow(label, r.answered_count, r.correct_count));
   });
 }
 
@@ -3269,14 +3273,26 @@ function renderPlayerLogDaySessions(rows) {
     wrap.appendChild(p);
     return;
   }
-  rows.forEach((r, i) => {
+
+  // 履歴は最新5件だけ表示する（行はstarted_at昇順で届くため末尾5件が最新。
+  // SESSION番号はその日の通し番号を保ったまま表示する）
+  const MAX_VISIBLE_SESSIONS = 5;
+  const hiddenCount = Math.max(0, rows.length - MAX_VISIBLE_SESSIONS);
+  if (hiddenCount > 0) {
+    const p = document.createElement("p");
+    p.className = "muted-text";
+    p.textContent = `※ 古い${hiddenCount}件は省略し、最新${MAX_VISIBLE_SESSIONS}件を表示しています`;
+    wrap.appendChild(p);
+  }
+
+  rows.slice(-MAX_VISIBLE_SESSIONS).forEach((r, i) => {
     const item = document.createElement("div");
     item.className = "pl-session-item";
 
     const head = document.createElement("p");
     head.className = "pl-session-head";
     const timeRange = `${plFormatTimeHM(r.started_at)}〜${r.ended_at ? plFormatTimeHM(r.ended_at) : "-"}`;
-    head.textContent = `SESSION ${plPad2(i + 1)}　${timeRange}`;
+    head.textContent = `SESSION ${plPad2(hiddenCount + i + 1)}　${timeRange}`;
     if (r.exited_early) {
       const tag = document.createElement("span");
       tag.className = "pl-session-tag";
@@ -3288,7 +3304,11 @@ function renderPlayerLogDaySessions(rows) {
     meta.className = "pl-session-meta";
     const modeLabel = PL_MODE_LABEL[r.mode] || r.mode || "任務";
     const parts = [modeLabel];
-    if (r.category && r.category !== "全エリア") parts.push(r.category);
+    if (r.category && r.category !== "全エリア") {
+      // 複数エリア選択時は「、」区切りで保存されているため、
+      // それぞれを章番号付きの表示名に変換してから連結し直す
+      parts.push(r.category.split("、").map((c) => categoryDisplayLabel(c)).join("、"));
+    }
     if (r.difficulty && r.difficulty !== "全レベル") parts.push(r.difficulty);
     meta.textContent = parts.join("／");
 

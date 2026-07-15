@@ -912,12 +912,22 @@ alter table daily_missions enable row level security;
 drop policy if exists "daily_missions are readable by anyone" on daily_missions;
 create policy "daily_missions are readable by anyone" on daily_missions for select using (true);
 
+-- ミッションの定義はこのシードが正（再実行すると文言・報酬EXPが最新化される）
 insert into daily_missions (key, title, description, mode_filter, target_count, reward_exp, sort_order) values
-  ('daily_knowledge_5', '基礎任務を5問解く', '基礎任務（知識問題）を今日中に5問解答しよう', 'knowledge', 5, 15, 1),
-  ('daily_practice_3', '判断任務を3問解く', '判断任務（実践提案）を今日中に3問解答しよう', 'practice', 3, 15, 2),
-  ('daily_review_3', '要再挑戦リストに3問挑む', '要再挑戦リストの問題を復習モードで3問解答しよう', 'review', 3, 20, 3),
-  ('daily_total_10', '今日の任務で10問解答する', '任務の種類を問わず、今日中に合計10問解答しよう', null, 10, 20, 4)
-on conflict (key) do nothing;
+  ('daily_knowledge_5', '基礎任務を5問解く', '基礎任務（知識問題）を今日中に5問解答しよう', 'knowledge', 5, 25, 1),
+  ('daily_review_3', '要再挑戦リストに3問挑む', '要再挑戦リストの問題を復習モードで3問解答しよう', 'review', 3, 30, 3),
+  ('daily_total_10', '今日の任務で10問解答する', '任務の種類を問わず、今日中に合計10問解答しよう', null, 10, 35, 4)
+on conflict (key) do update set
+  title = excluded.title,
+  description = excluded.description,
+  mode_filter = excluded.mode_filter,
+  target_count = excluded.target_count,
+  reward_exp = excluded.reward_exp,
+  sort_order = excluded.sort_order;
+
+-- 判断任務のデイリーミッションは廃止（実践提案問題は問題数が少なく、
+-- 毎日のノルマとしては重いため）。過去の受取記録もカスケードで消える
+delete from daily_missions where key = 'daily_practice_3';
 
 -- 「報酬を受け取り済みか」だけを記録する（進捗自体はanswer_historyから毎回計算する）
 create table if not exists user_daily_mission_claims (
