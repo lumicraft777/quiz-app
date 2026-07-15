@@ -475,6 +475,8 @@ async function toggleEquipBadge(badgeKey, isCurrentlyEquipped) {
     if (!row) throw new Error("プレイヤー情報が見つかりません。再ログインしてください");
     currentUserRecord.equippedBadgeKey = row.equipped_badge_key || null;
     currentUserRecord.equippedBadgeTitle = row.equipped_badge_title || null;
+    // 装備変更が攻略者ボードへ即時反映されるよう、ランキングのキャッシュを破棄する
+    invalidateRankingCache();
     const badges = await fetchBadges(currentUserRecord.id);
     renderBadges(badges);
   } catch (err) {
