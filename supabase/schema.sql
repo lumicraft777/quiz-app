@@ -101,6 +101,9 @@ create table if not exists answer_history (
 );
 create index if not exists answer_history_lookup
   on answer_history (user_id, question_id, answered_at desc);
+-- 週間/月間ランキングが「直近7日/30日」の絞り込みで全件走査しないための時系列インデックス
+create index if not exists answer_history_answered_at
+  on answer_history (answered_at desc);
 
 -- ================================================================
 -- quiz_sessions: PLAYER LOG（個人学習記録）機能のためのセッション単位の記録。
@@ -816,21 +819,60 @@ alter table badges enable row level security;
 drop policy if exists "badges are readable by anyone" on badges;
 create policy "badges are readable by anyone" on badges for select using (true);
 
-insert into badges (key, title, description, sort_order) values
-  ('first_correct', 'はじめの一歩', '初めて1問正解した', 1),
-  ('combo_10', '集中モード', '10問連続正解を達成した', 2),
-  ('review_master', '復習の鬼', '復習モードで5問正解した', 3),
-  ('advanced_5', '上級アドバイザー', '上級問題に5問正解した', 4),
-  ('all_rounder', 'オールラウンダー', '全エリアを1回以上プレイした', 5),
-  ('streak_7', '継続の達人', '7日間連続でログインした', 6),
-  ('perfect_clear', '完全制圧者', '正答率100%で任務を完了した', 7),
-  ('streak_3', '習慣化の入口', '3日間連続で学習した', 8),
-  ('trainee_30', '訓練兵', '累計30問以上に解答した', 9),
-  ('conqueror_100', '攻略者', '累計100問以上に解答した', 10),
-  ('combo_20', '連撃マスター', '最大20連続正解を達成した', 11),
-  ('comeback_master', '再起の達人', '苦手だった問題をすべて復習し尽くした', 12),
-  ('zero_to_one', 'ZERO TO ONE', '覚悟0％から、最初の一歩を記録した', 13)
-on conflict (key) do nothing;
+-- 隠し称号フラグ。trueの称号は、解放するまでクライアント側で
+-- タイトル・解放条件を「？？？」として伏せて表示する
+alter table badges add column if not exists is_secret boolean not null default false;
+
+-- 称号の定義はこのシードが正（再実行すると文言・並び順・隠しフラグが最新化される）
+insert into badges (key, title, description, sort_order, is_secret) values
+  -- 解答数・成長の道のり
+  ('first_correct', 'はじめの一歩', '初めて1問正解した', 1, false),
+  ('trainee_30', '訓練兵', '累計30問以上に解答した', 2, false),
+  ('conqueror_100', '攻略者', '累計100問以上に解答した', 3, false),
+  ('conqueror_300', '歴戦の攻略者', '累計300問以上に解答した', 4, false),
+  ('answers_1000', '千戦錬磨', '累計1000問以上に解答した', 5, false),
+  ('correct_200', '精鋭の証', '累計200問以上に正解した', 6, false),
+  -- コンボ
+  ('combo_10', '集中モード', '10問連続正解を達成した', 7, false),
+  ('combo_20', '連撃マスター', '最大20連続正解を達成した', 8, false),
+  ('combo_30', '怒涛の連撃', '最大30連続正解を達成した', 9, false),
+  ('combo_50', 'ゾーンの支配者', '最大50連続正解を達成した', 10, false),
+  -- 完全制圧
+  ('perfect_clear', '完全制圧者', '正答率100%で任務を完了した', 11, false),
+  ('perfect_3', '常勝無敗', '5問以上の任務を正答率100%で3回完了した', 12, false),
+  -- 上級・復習・克服
+  ('advanced_5', '上級アドバイザー', '上級問題に5問正解した', 13, false),
+  ('advanced_20', '上級を統べる者', '上級問題に20問正解した', 14, false),
+  ('review_master', '復習の鬼', '復習モードで5問正解した', 15, false),
+  ('review_20', '弱点ハンター', '復習モードで20問正解した', 16, false),
+  ('comeback_master', '再起の達人', '苦手だった問題をすべて復習し尽くした', 17, false),
+  -- 網羅・二刀流
+  ('all_rounder', 'オールラウンダー', '全エリアを1回以上プレイした', 18, false),
+  ('dual_master', '文武両道', '基礎任務と判断任務の両方で10問以上正解した', 19, false),
+  -- 継続
+  ('streak_3', '習慣化の入口', '3日間連続で学習した', 20, false),
+  ('streak_7', '継続の達人', '7日間連続でログインした', 21, false),
+  ('streak_14', '二週間の誓い', '14日間連続で学習した', 22, false),
+  ('streak_30', '鉄の意志', '30日間連続で学習した', 23, false),
+  -- レベル・出撃回数
+  ('level_10', '新星', 'レベル10に到達した', 24, false),
+  ('level_30', '歴戦の勇士', 'レベル30に到達した', 25, false),
+  ('level_50', '仮想空間の英雄', 'レベル50に到達した', 26, false),
+  ('sessions_50', '歴戦の出撃', '任務に50回出撃した', 27, false),
+  -- 隠し称号（解放するまで？？？表示）
+  ('zero_to_one', 'ZERO TO ONE', '覚悟0％から、最初の一歩を記録した', 90, true),
+  ('night_owl', '真夜中の修行者', '深夜0時〜4時の間に任務へ挑んだ', 91, true),
+  ('early_bird', '夜明けの狩人', '早朝4時〜7時の間に任務へ挑んだ', 92, true),
+  ('persistence', '七転八起', '3回以上間違えた問題に、ついに正解した', 93, true),
+  ('speedster', '電光石火', '10問以上の任務を3分以内に完了した', 94, true),
+  ('all_miss', 'どん底を見た者', '5問以上の任務で全問不正解でも、記録を残した', 95, true),
+  ('lucky_777', 'ラッキーセブン', '累計解答数777問に到達した', 96, true),
+  ('world_master', 'ワールドマスター', 'すべての問題に1回以上正解した', 97, true)
+on conflict (key) do update set
+  title = excluded.title,
+  description = excluded.description,
+  sort_order = excluded.sort_order,
+  is_secret = excluded.is_secret;
 
 -- user_badges: 誰がどのバッジを解放済みか
 create table if not exists user_badges (
@@ -878,14 +920,16 @@ alter table user_daily_mission_claims enable row level security;
 -- ================================================================
 -- 称号・バッジRPC
 -- ================================================================
+drop function if exists rpc_get_badges(uuid);
 create or replace function rpc_get_badges(p_user_id uuid)
 returns table (
-  key text, title text, description text, sort_order int, unlocked boolean, unlocked_at timestamptz
+  key text, title text, description text, sort_order int, is_secret boolean,
+  unlocked boolean, unlocked_at timestamptz
 )
 language sql
 security definer
 as $$
-  select b.key, b.title, b.description, b.sort_order,
+  select b.key, b.title, b.description, b.sort_order, b.is_secret,
          (ub.user_id is not null) as unlocked, ub.unlocked_at
   from badges b
   left join user_badges ub on ub.badge_key = b.key and ub.user_id = p_user_id
@@ -906,6 +950,17 @@ declare
   v_ever_wrong int;
   v_currently_wrong int;
   v_advanced_correct int;
+  v_knowledge_correct int;
+  v_practice_correct int;
+  v_has_night boolean;
+  v_has_early boolean;
+  v_persistence boolean;
+  v_sessions int;
+  v_perfect_sessions int;
+  v_speed boolean;
+  v_all_miss boolean;
+  v_correct_distinct int;
+  v_questions_total int;
 begin
   select * into v_user from users u where u.id = p_user_id;
   if v_user.id is null then return; end if;
@@ -922,24 +977,85 @@ begin
   from answer_history ah join questions q on q.id = ah.question_id
   where ah.user_id = p_user_id and ah.correct and q.difficulty = '上級';
 
+  -- 文武両道・深夜/早朝の隠し称号・全問制覇の判定材料（時刻は日本時間で判定）
+  select count(*) filter (where ah.mode = 'knowledge' and ah.correct),
+         count(*) filter (where ah.mode = 'practice' and ah.correct),
+         coalesce(bool_or(extract(hour from ah.answered_at at time zone 'Asia/Tokyo') between 0 and 3), false),
+         coalesce(bool_or(extract(hour from ah.answered_at at time zone 'Asia/Tokyo') between 4 and 6), false),
+         count(distinct ah.question_id) filter (where ah.correct)
+  into v_knowledge_correct, v_practice_correct, v_has_night, v_has_early, v_correct_distinct
+  from answer_history ah where ah.user_id = p_user_id;
+
+  select count(*) into v_questions_total from questions;
+
+  -- 七転八起：3回以上間違えたことのある問題に、正解した経験があるか
+  select exists (
+    select 1 from (
+      select ah.question_id,
+             count(*) filter (where not ah.correct) as wrong_n,
+             bool_or(ah.correct) as ever_correct
+      from answer_history ah where ah.user_id = p_user_id
+      group by ah.question_id
+    ) t where t.wrong_n >= 3 and t.ever_correct
+  ) into v_persistence;
+
+  -- 出撃回数・常勝無敗・電光石火・どん底の判定材料（quiz_sessionsから）
+  select count(*),
+         count(*) filter (where qs.completed and qs.answered_count >= 5 and qs.correct_count = qs.answered_count),
+         coalesce(bool_or(qs.completed and qs.answered_count >= 10 and qs.ended_at is not null
+                          and qs.ended_at - qs.started_at <= interval '3 minutes'), false),
+         coalesce(bool_or(qs.answered_count >= 5 and qs.correct_count = 0), false)
+  into v_sessions, v_perfect_sessions, v_speed, v_all_miss
+  from quiz_sessions qs where qs.user_id = p_user_id;
+
   return query
   with newly_inserted as (
     insert into user_badges (user_id, badge_key)
     select p_user_id, k from (values
+      -- 解答数・成長
       ('first_correct', v_user.total_correct >= 1),
-      ('combo_10', v_user.best_streak >= 10),
-      ('review_master', v_user.review_correct_count >= 5),
-      ('advanced_5', v_advanced_correct >= 5),
-      ('all_rounder', v_categories_total > 0 and v_categories_played >= v_categories_total),
-      ('streak_7', v_user.streak_days >= 7),
-      ('perfect_clear', v_user.best_rate = 100),
-      ('streak_3', v_user.streak_days >= 3),
       ('trainee_30', v_user.total_answered >= 30),
       ('conqueror_100', v_user.total_answered >= 100),
+      ('conqueror_300', v_user.total_answered >= 300),
+      ('answers_1000', v_user.total_answered >= 1000),
+      ('correct_200', v_user.total_correct >= 200),
+      -- コンボ
+      ('combo_10', v_user.best_streak >= 10),
       ('combo_20', v_user.best_streak >= 20),
+      ('combo_30', v_user.best_streak >= 30),
+      ('combo_50', v_user.best_streak >= 50),
+      -- 完全制圧
+      ('perfect_clear', v_user.best_rate = 100),
+      ('perfect_3', v_perfect_sessions >= 3),
+      -- 上級・復習・克服
+      ('advanced_5', v_advanced_correct >= 5),
+      ('advanced_20', v_advanced_correct >= 20),
+      ('review_master', v_user.review_correct_count >= 5),
+      ('review_20', v_user.review_correct_count >= 20),
       ('comeback_master', v_ever_wrong > 0 and v_currently_wrong = 0),
-      -- 初回登録で覚悟0%を選んだ正直なプレイヤーが、3日間学習を続けたら贈られる隠し称号
-      ('zero_to_one', v_user.started_from_zero_resolve and v_user.streak_days >= 3)
+      -- 網羅・二刀流
+      ('all_rounder', v_categories_total > 0 and v_categories_played >= v_categories_total),
+      ('dual_master', v_knowledge_correct >= 10 and v_practice_correct >= 10),
+      -- 継続
+      ('streak_3', v_user.streak_days >= 3),
+      ('streak_7', v_user.streak_days >= 7),
+      ('streak_14', v_user.streak_days >= 14),
+      ('streak_30', v_user.streak_days >= 30),
+      -- レベル・出撃回数
+      ('level_10', v_user.level >= 10),
+      ('level_30', v_user.level >= 30),
+      ('level_50', v_user.level >= 50),
+      ('sessions_50', v_sessions >= 50),
+      -- 隠し称号
+      -- 初回登録で覚悟0%を選んだ正直なプレイヤーが、3日間学習を続けたら贈られる
+      ('zero_to_one', v_user.started_from_zero_resolve and v_user.streak_days >= 3),
+      ('night_owl', v_has_night),
+      ('early_bird', v_has_early),
+      ('persistence', v_persistence),
+      ('speedster', v_speed),
+      ('all_miss', v_all_miss),
+      ('lucky_777', v_user.total_answered >= 777),
+      ('world_master', v_questions_total > 0 and v_correct_distinct >= v_questions_total)
     ) as conds(k, ok)
     where ok
     on conflict (user_id, badge_key) do nothing

@@ -9,7 +9,7 @@
 <!-- style.css / script.js を編集したら ?v= の数字を必ず増やすこと。
      増やさないと、ブラウザにキャッシュされた古いファイルが
      読み込まれ続け、コード修正がユーザーの端末に反映されないため。 -->
-<link rel="stylesheet" href="style.css?v=36">
+<link rel="stylesheet" href="style.css?v=37">
 </head>
 <body>
 
@@ -499,7 +499,7 @@
     <button type="button" id="btn-ranking-back-top" class="ranking-back-top">← 戻る</button>
     <header class="app-header">
       <h1>攻略者ボード</h1>
-      <p id="ranking-sub" class="app-sub">正答率が高い順に表示しています（上位100名）</p>
+      <p id="ranking-sub" class="app-sub">正答率が高い順（上位5名＋あなたの順位）</p>
     </header>
 
     <div class="ranking-tabs" id="ranking-tabs">
@@ -514,6 +514,7 @@
     </div>
 
     <div class="card">
+      <p id="ranking-loading-text" class="ranking-loading-text" hidden>DATA LINK...</p>
       <div id="ranking-list" class="ranking-list"></div>
       <p id="ranking-empty-text" class="muted-text" hidden>まだ誰も記録がありません。最初の任務に挑もう！</p>
       <p id="ranking-error-text" class="warning-text" hidden></p>
@@ -806,6 +807,6 @@
 
 </div>
 
-<script src="script.js?v=52"></script>
+<script src="script.js?v=53"></script>
 </body>
 </html>

@@ -1680,6 +1680,20 @@ select:-webkit-autofill:focus {
   letter-spacing: 0.3em;
   padding: 2px 0;
 }
+/* データ取得中の表示（点滅するシステムメッセージ風） */
+.ranking-loading-text {
+  margin: 8px 0;
+  text-align: center;
+  font-family: "Courier New", monospace;
+  font-size: 0.82rem;
+  letter-spacing: 0.24em;
+  color: var(--color-primary);
+  animation: ranking-loading-blink 1s ease-in-out infinite;
+}
+@keyframes ranking-loading-blink {
+  0%, 100% { opacity: 0.9; }
+  50% { opacity: 0.3; }
+}
 .ranking-stats {
   flex: 1 1 100%;
   width: 100%;
@@ -2430,6 +2444,15 @@ select:-webkit-autofill:focus {
 }
 .badge-item.locked {
   opacity: 0.5;
+}
+/* 隠し称号（未解放）：存在だけを匂わせる紫がかった「？？？」表示 */
+.badge-item.secret {
+  border-color: rgba(178, 102, 255, 0.4);
+  background: rgba(178, 102, 255, 0.06);
+}
+.badge-item.secret .badge-item-title {
+  color: #c9a2ff;
+  letter-spacing: 0.2em;
 }
 .badge-item.tappable {
   cursor: pointer;

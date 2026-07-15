@@ -428,16 +428,19 @@ function renderBadges(badges) {
   badges.forEach((b) => {
     const item = document.createElement("div");
     const isEquipped = b.unlocked && b.key === equippedKey;
+    // 隠し称号は解放するまでタイトル・解放条件を伏せて、存在だけを匂わせる
+    const isHiddenSecret = b.is_secret && !b.unlocked;
     item.className = "badge-item" + (b.unlocked ? " unlocked" : " locked") + (isEquipped ? " equipped" : "");
+    if (isHiddenSecret) item.classList.add("secret");
     const icon = document.createElement("span");
     icon.className = "badge-item-icon";
-    icon.textContent = b.unlocked ? (isEquipped ? "⭐" : "🎖️") : "🔒";
+    icon.textContent = b.unlocked ? (isEquipped ? "⭐" : "🎖️") : (isHiddenSecret ? "❓" : "🔒");
     const title = document.createElement("span");
     title.className = "badge-item-title";
-    title.textContent = b.title;
+    title.textContent = isHiddenSecret ? "？？？" : b.title;
     const desc = document.createElement("span");
     desc.className = "badge-item-desc";
-    desc.textContent = b.description;
+    desc.textContent = isHiddenSecret ? "隠し称号：解放条件は秘密" : b.description;
     item.appendChild(icon);
     item.appendChild(title);
     item.appendChild(desc);
@@ -993,6 +996,8 @@ async function startPlayerLogSession(userId, mode, category, difficulty, selecte
 
 async function finishPlayerLogSession(sessionId, info) {
   if (!sessionId) return;
+  // 任務結果で自分の順位・成績が変わるため、攻略者ボードのキャッシュを破棄する
+  invalidateRankingCache();
   try {
     await supabaseRpc("rpc_finish_player_log_session", {
       p_session_id: sessionId,
@@ -3312,14 +3317,14 @@ async function refreshPlayerLogHomeCard() {
 let currentRankingType = "overall";
 
 const RANKING_SUBCOPY = {
-  overall: "正答率が高い順に表示しています（上位100名）",
-  streak: "毎日欠かさずログインしている日数が多い順に表示しています（上位100名）",
-  weekly: "直近7日間の正解数が多い順に表示しています（上位100名）",
-  monthly: "直近30日間の正解数が多い順に表示しています（上位100名）",
-  combo: "最大コンボ数が多い順に表示しています（上位100名）",
-  suppression: "正答率が高い順に表示しています（上位100名）",
-  missions: "累計解答数が多い順に表示しています（上位100名）",
-  review: "要再挑戦リストの復習正解数が多い順に表示しています（上位100名）"
+  overall: "正答率が高い順（上位5名＋あなたの順位）",
+  streak: "毎日欠かさずログインしている日数が多い順（上位5名＋あなたの順位）",
+  weekly: "直近7日間の正解数が多い順（上位5名＋あなたの順位）",
+  monthly: "直近30日間の正解数が多い順（上位5名＋あなたの順位）",
+  combo: "最大コンボ数が多い順（上位5名＋あなたの順位）",
+  suppression: "正答率が高い順（上位5名＋あなたの順位）",
+  missions: "累計解答数が多い順（上位5名＋あなたの順位）",
+  review: "要再挑戦リストの復習正解数が多い順（上位5名＋あなたの順位）"
 };
 
 function setupRankingTabs() {
@@ -3402,19 +3407,43 @@ function buildRankingStatsLines(type, row) {
   }
 }
 
+// 取得済みランキングの一時キャッシュ。タブを行き来したときに毎回サーバーへ
+// 問い合わせない（体感の重さの主因が通信待ちのため）。60秒で失効し、
+// 任務終了時にも全消しするので、大きく古い順位が表示され続けることはない
+const RANKING_CACHE_TTL_MS = 60 * 1000;
+const rankingCache = new Map(); // type -> { rows, fetchedAt }
+
+function invalidateRankingCache() {
+  rankingCache.clear();
+}
+
 // ランキング画面の描画（全ユーザー横断。ユーザー名以外の個人情報は表示しない）
 async function renderRankingScreen() {
   const listEl = document.getElementById("ranking-list");
   const emptyEl = document.getElementById("ranking-empty-text");
   const errorEl = document.getElementById("ranking-error-text");
+  const loadingEl = document.getElementById("ranking-loading-text");
 
   listEl.innerHTML = "";
   emptyEl.hidden = true;
   errorEl.hidden = true;
 
+  // タブ連打対策：await中にタブが切り替わっていたら、この結果は描画しない
+  const requestType = currentRankingType;
+
   try {
-    const fetcher = RANKING_FETCHERS[currentRankingType] || RANKING_FETCHERS.overall;
-    const rows = await fetcher();
+    let rows;
+    const cached = rankingCache.get(requestType);
+    if (cached && Date.now() - cached.fetchedAt < RANKING_CACHE_TTL_MS) {
+      rows = cached.rows;
+    } else {
+      if (loadingEl) loadingEl.hidden = false;
+      const fetcher = RANKING_FETCHERS[requestType] || RANKING_FETCHERS.overall;
+      rows = await fetcher();
+      rankingCache.set(requestType, { rows, fetchedAt: Date.now() });
+      if (loadingEl) loadingEl.hidden = true;
+      if (currentRankingType !== requestType) return;
+    }
 
     if (rows.length === 0) {
       emptyEl.hidden = false;
@@ -3472,6 +3501,7 @@ async function renderRankingScreen() {
       listEl.appendChild(item);
     });
   } catch (err) {
+    if (loadingEl) loadingEl.hidden = true;
     errorEl.textContent = `攻略者ボードの取得に失敗しました：${err.message}`;
     errorEl.hidden = false;
   }
