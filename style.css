@@ -47,6 +47,16 @@ html {
   /* ラバーバンド時に見えるページ外領域も世界観と同じ暗色にしておく */
   background: #020409;
 }
+/* PCブラウザのスクロールバーを非表示にする（スクロール操作自体は
+   ホイール・キーボード・ドラッグで従来どおり可能）。没入感を優先し、
+   ページ本体だけでなく辞典パネルなどの内部スクロール領域にも適用する */
+* {
+  scrollbar-width: none;      /* Firefox */
+  -ms-overflow-style: none;   /* 旧Edge/IE */
+}
+*::-webkit-scrollbar {
+  display: none;              /* Chrome / Edge / Safari */
+}
 body {
   font-family: "Hiragino Sans", "Yu Gothic", "Segoe UI", sans-serif;
   background: var(--color-bg);
